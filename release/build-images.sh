@@ -36,6 +36,7 @@ for f in "$MODS/mod-chat/public/nostr/"*.js; do cp "$f" "$BUILD/modules/mod-chat
 [ -f "$MODS/mod-chat/public/nostr/package.json" ] && cp "$MODS/mod-chat/public/nostr/package.json" "$BUILD/modules/mod-chat/public/nostr/"
 cp -r "$MODS/mod-chat/public/vendor/noble"  "$BUILD/modules/mod-chat/public/vendor/"
 cp "$STORE/depool-node/docker-compose.yml"  "$BUILD/docker-compose.yml"
+cp "$STORE/release/control.env"             "$BUILD/control.env"
 cp "$SRC/bootstrap.sh"                      "$BUILD/stack/"
 
 # ── 2. retag + push the four direct images (SKIP_PUSH=1 tags only — the

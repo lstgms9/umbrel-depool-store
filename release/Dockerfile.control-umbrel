@@ -6,3 +6,6 @@
 ARG BASE=depool-stack-control:latest
 FROM ${BASE}
 COPY docker-compose.yml /depool/docker-compose.yml
+# control reads power/mode/role from COMPOSE_DIR/.env — umbrelOS never
+# writes one, so the umbrel values are baked (node role, grind off)
+COPY control.env /depool/.env

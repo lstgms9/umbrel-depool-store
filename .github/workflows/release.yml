@@ -44,6 +44,7 @@ jobs:
           curl -fsSL "$ORIGIN/api/btc/stack/bundle" -o bundle.tgz
           mkdir bundle && tar -xzf bundle.tgz -C bundle stack modules
           cp depool-node/docker-compose.yml bundle/docker-compose.yml
+          cp release/control.env bundle/control.env
           ls bundle/modules/mod-btc/lib bundle/modules/mod-chat/lib
 
       - name: Build the seven app images

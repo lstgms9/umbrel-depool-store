@@ -41,15 +41,16 @@ $DC up -d 2>&1 | tail -3
 ok=0; fail=0
 t() { if [ "$2" = "0" ]; then echo "ok - $1"; ok=$((ok+1)); else echo "FAIL - $1"; fail=$((fail+1)); fi; }
 
-# 1. bootstrap: one-shot, must exit 0 with BOOTSTRAP-OK (funding + channel)
+# 1. bootstrap: one-shot, must finish with BOOTSTRAP-OK (funding + channel).
+# Poll the REAL condition — the log line — not the container state; a cold
+# two-chain regtest can outrun a short ceiling (first run proved it).
 BOOT=0
-for i in $(seq 1 120); do
-  ST=$($DC ps -a --format '{{.Service}} {{.State}}' 2>/dev/null | grep '^bootstrap' | awk '{print $2}')
-  [ "$ST" = "exited" ] && BOOT=1 && break
+for i in $(seq 1 240); do
+  $DC logs bootstrap 2>&1 | grep -q BOOTSTRAP-OK && BOOT=1 && break
   sleep 5
 done
-t "bootstrap finished (exited, not restarted)" "$BOOT"
-$DC logs bootstrap 2>&1 | grep -q BOOTSTRAP-OK; t "bootstrap says BOOTSTRAP-OK" $?
+t "bootstrap says BOOTSTRAP-OK" "$((1 - BOOT))"
+$DC ps -a --format '{{.Service}} {{.State}}' 2>/dev/null | grep -q '^bootstrap exited'; t "bootstrap exited (one-shot, not restarted)" $?
 
 # 2. sharechaind minted its identity (the npub the heartbeat pairs with)
 NPUB=""
@@ -88,5 +89,8 @@ execFile("docker", ["compose","--project-directory","/depool","-f","/depool/dock
 t "control reaches cln-payee through the baked compose + project name" $?
 
 echo "[harness] $ok passed, $fail failed"
-$DC down -v >/dev/null 2>&1; rm -rf "$H"
+$DC down -v >/dev/null 2>&1
+# the data dir is root-owned (container users wrote it) — clean via a root container
+docker run --rm -v "$H:/x" alpine rm -rf /x/app-data >/dev/null 2>&1
+rm -rf "$H"
 [ "$fail" = "0" ]

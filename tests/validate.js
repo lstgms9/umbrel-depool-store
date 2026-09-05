@@ -77,6 +77,12 @@ t('app_proxy routes the umbrelOS Open button to control', /APP_HOST:\s*depool-no
 for (const f of ['Dockerfile.sharechaind-umbrel', 'Dockerfile.control-umbrel', 'Dockerfile.bootstrap-umbrel']) {
   t('release has ' + f, fs.existsSync(path.join(__dirname, '..', 'release', f)));
 }
+// control reads power/mode/role from COMPOSE_DIR/.env — umbrelOS never
+// writes one, so the node-role values must ride in the control image
+const controlEnv = R('release/control.env');
+t('control.env bakes the node role (grind off)', /DEPOOL_GRIND=0/.test(controlEnv));
+t('control.env is copied to /depool/.env by its Dockerfile',
+  /COPY control\.env \/depool\/\.env/.test(R('release/Dockerfile.control-umbrel')));
 t('release script pushes + pins', /images-lock\.json/.test(R('release/build-images.sh')));
 
 console.log(pass + ' passed, ' + fail + ' failed');
