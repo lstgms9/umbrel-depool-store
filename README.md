@@ -48,10 +48,10 @@ public artifact the tenant already serves (the same images tarball + bundle
 `release/forkd-bin/`. The workflow pushes the seven images, rewrites the
 compose pins and commits `images-lock.json`.
 
-**ONE-TIME after the first run:** flip the seven ghcr packages public —
-github.com/lstgms9?tab=packages → each package → Package settings →
-Change visibility → Public. umbrelOS pulls anonymously; private packages
-403 for users. Later releases keep the visibility.
+**Visibility:** packages pushed by the workflow came out **public** —
+verified with an anonymous manifest pull (v0.1.0, 2026-09-05). If a future
+release lands private, flip it at github.com/lstgms9?tab=packages →
+Package settings → Change visibility.
 
 Dev-box fallback (works, needs a packages-scoped token):
 `release/build-images.sh v0.1.1`.
