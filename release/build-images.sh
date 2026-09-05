@@ -38,8 +38,13 @@ cp -r "$MODS/mod-chat/public/vendor/noble"  "$BUILD/modules/mod-chat/public/vend
 cp "$STORE/depool-node/docker-compose.yml"  "$BUILD/docker-compose.yml"
 cp "$SRC/bootstrap.sh"                      "$BUILD/stack/"
 
-# ── 2. retag + push the four direct images ──
-retag() { docker tag "$1" "$GH/$2:$VER" && docker push "$GH/$2:$VER" >/dev/null && echo "pushed $GH/$2:$VER"; }
+# ── 2. retag + push the four direct images (SKIP_PUSH=1 tags only — the
+#      dev harness runs the pinned compose against locally-tagged images) ──
+if [ "${SKIP_PUSH:-0}" = "1" ]; then
+  retag() { docker tag "$1" "$GH/$2:$VER" && echo "tagged $GH/$2:$VER"; }
+else
+  retag() { docker tag "$1" "$GH/$2:$VER" && docker push "$GH/$2:$VER" >/dev/null && echo "pushed $GH/$2:$VER"; }
+fi
 retag depool-forkd-blake2b:latest     depool-forkd-blake2b
 retag depool-stack-cln-payer:latest   depool-cln
 retag depool-stack-relay:latest       depool-relay
@@ -48,7 +53,8 @@ retag depool-stack-stratum:latest     depool-stratum
 # ── 3. bake + push the three derived images ──
 bake() { # <dockerfile> <base> <name>
   docker build --build-arg BASE="$2" -f "$STORE/release/Dockerfile.$1" -t "$GH/$3:$VER" "$BUILD" >/dev/null
-  docker push "$GH/$3:$VER" >/dev/null && echo "pushed $GH/$3:$VER"
+  if [ "${SKIP_PUSH:-0}" != "1" ]; then docker push "$GH/$3:$VER" >/dev/null; fi
+  echo "baked $GH/$3:$VER"
 }
 bake sharechaind-umbrel depool-stack-sharechaind:latest depool-sharechaind
 bake control-umbrel     depool-stack-control:latest     depool-control
