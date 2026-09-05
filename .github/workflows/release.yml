@@ -58,6 +58,9 @@ jobs:
             -f release/Dockerfile.control-umbrel -t $GH/depool-control:$VER bundle
           docker tag depool-stack-cln-payer:latest   $GH/depool-cln:$VER
           docker tag depool-stack-relay:latest       $GH/depool-relay:$VER
+          # the tarball never carried stratum: customer boxes build it from the
+          # bundle (install.sh's --build leg) — CI does the same
+          docker build -f bundle/stack/stratum/Dockerfile -t depool-stack-stratum:latest bundle/stack/stratum
           docker tag depool-stack-stratum:latest     $GH/depool-stratum:$VER
           docker build -f release/Dockerfile.forkd-umbrel -t $GH/depool-forkd-blake2b:$VER release/forkd-bin
 

@@ -78,10 +78,19 @@ tests/validate.js         structure gate: node tests/validate.js
 ## Verified how
 
 No Umbrel box in the fleet, so the harness is **dev (Debian) + Docker
-simulating umbrelOS's compose conventions**: project name = the app id,
-`APP_DATA_DIR`/`APP_SEED`/`DEVICE_HOSTNAME` exported as umbrelOS's app-script
-does, images pulled from ghcr (no local builds), one compose file. umbreld's
-own validation rules (data under `APP_DATA_DIR/data`, `APP_SEED` +
-`DEVICE_HOSTNAME` injection, `--project-name <app id>`) were read from
-umbreld's source and are enforced by `tests/validate.js` instead of a live
-umbrelOS. Not yet exercised: umbrelOS's app-store installer itself.
+simulating umbrelOS's compose conventions** (`tests/harness.sh`): project
+name = the app id, `APP_DATA_DIR`/`APP_SEED`/`DEVICE_HOSTNAME` exported as
+umbrelOS's app-script does, images by pinned ghcr tag, one compose file.
+Result on a cold run: **7/7** — bootstrap funds the payer + opens the
+channel (`BOOTSTRAP-OK`, exits), sharechaind mints its npub, control
+`/status` reports `running=true role=node grinding=false` with live node
+facts, **stratum answers a real `mining.subscribe`** on the LAN port, and
+control's compose-exec reaches cln-payee through the baked compose +
+project name (the wallet rail). umbreld's own validation rules (data under
+`APP_DATA_DIR/data`, `APP_SEED` + `DEVICE_HOSTNAME` injection,
+`--project-name <app id>`) were read from umbreld's source and are enforced
+by `tests/validate.js`. One finding the harness caught: control reads
+power/role from `COMPOSE_DIR/.env`, which umbrelOS never materializes — the
+node-role values are now baked into the control image (`release/control.env`).
+Not yet exercised: umbrelOS's app-store installer itself (needs a real
+umbrelOS box or VM).
