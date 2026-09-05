@@ -1,0 +1,102 @@
+# release.yml — push the depool images for the app store to ghcr.io.
+# Manual: Actions → release → Run workflow (input: version, e.g. v0.1.1).
+#
+# Why CI and not the dev box: the dev box's fine-grained PAT cannot write
+# packages; this workflow's GITHUB_TOKEN gets packages:write for free.
+# Every input is a PUBLIC artifact the tenant already serves (the same two
+# URLs install.sh uses) plus the stripped Knots binaries committed under
+# release/forkd-bin/ — no platform checkout, no secrets.
+#
+# ONE-TIME after the first run: flip the seven ghcr packages public
+# (github.com/lstgms9?tab=packages → each → Package settings → visibility).
+# umbrelOS pulls anonymously, so private packages would 403 for users.
+# Subsequent releases keep the visibility you set.
+name: release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'image version tag, e.g. v0.1.0'
+        required: true
+permissions:
+  contents: write
+  packages: write
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    env:
+      VER: ${{ inputs.version }}
+      GH: ghcr.io/lstgms9
+      ORIGIN: https://hashoid.io
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── the six stack images, exactly the tarball install.sh loads ──
+      - name: Load the stack images
+        run: |
+          curl -fsSL "$ORIGIN/api/btc/stack/images.tar.gz" -o images.tgz
+          docker load -i images.tgz
+          docker images --format '{{.Repository}}:{{.Tag}}' | grep depool-stack
+
+      # ── the reduced modules tree + bootstrap.sh, from the same bundle ──
+      - name: Fetch the tenant bundle
+        run: |
+          curl -fsSL "$ORIGIN/api/btc/stack/bundle" -o bundle.tgz
+          mkdir bundle && tar -xzf bundle.tgz -C bundle stack modules
+          cp depool-node/docker-compose.yml bundle/docker-compose.yml
+          ls bundle/modules/mod-btc/lib bundle/modules/mod-chat/lib
+
+      - name: Build the seven app images
+        run: |
+          set -e
+          docker build --build-arg BASE=depool-stack-cln-payer:latest \
+            -f release/Dockerfile.bootstrap-umbrel -t $GH/depool-bootstrap:$VER bundle
+          docker build --build-arg BASE=depool-stack-sharechaind:latest \
+            -f release/Dockerfile.sharechaind-umbrel -t $GH/depool-sharechaind:$VER bundle
+          docker build --build-arg BASE=depool-stack-control:latest \
+            -f release/Dockerfile.control-umbrel -t $GH/depool-control:$VER bundle
+          docker tag depool-stack-cln-payer:latest   $GH/depool-cln:$VER
+          docker tag depool-stack-relay:latest       $GH/depool-relay:$VER
+          docker tag depool-stack-stratum:latest     $GH/depool-stratum:$VER
+          docker build -f release/Dockerfile.forkd-umbrel -t $GH/depool-forkd-blake2b:$VER release/forkd-bin
+
+      - name: Push
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          for img in depool-forkd-blake2b depool-cln depool-relay depool-stratum \
+                     depool-sharechaind depool-control depool-bootstrap; do
+            docker push $GH/$img:$VER
+          done
+
+      # the version pins in the app compose must match what we just pushed
+      - name: Pin the compose + lock
+        run: |
+          for img in depool-forkd-blake2b depool-cln depool-relay depool-stratum \
+                     depool-sharechaind depool-control depool-bootstrap; do
+            sed -i "s#ghcr.io/lstgms9/$img:v[0-9.]*#ghcr.io/lstgms9/$img:$VER#g" depool-node/docker-compose.yml
+          done
+          node -e '
+            const fs = require("fs"), { execSync } = require("child_process");
+            const names = ["depool-forkd-blake2b","depool-cln","depool-relay","depool-stratum",
+                           "depool-sharechaind","depool-control","depool-bootstrap"];
+            const ver = process.env.VER, gh = process.env.GH;
+            const lock = {};
+            for (const n of names) {
+              const d = execSync(`docker inspect --format "{{index .RepoDigests 0}}" ${gh}/${n}:${ver}`).toString().trim().split("@")[1] || "";
+              lock[n] = { tag: ver, digest: d };
+            }
+            fs.writeFileSync("release/images-lock.json", JSON.stringify(lock, null, 1) + "\n");
+          '
+          git config user.name "depublish-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add depool-node/docker-compose.yml release/images-lock.json
+          git commit -m "[release] $VER images pushed + pinned" || echo "nothing to commit"
+          git push
+
+      - name: Summary
+        run: |
+          for img in depool-forkd-blake2b depool-cln depool-relay depool-stratum \
+                     depool-sharechaind depool-control depool-bootstrap; do
+            echo "$GH/$img:$VER pushed" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "ONE-TIME: flip the seven packages public at github.com/lstgms9?tab=packages" >> $GITHUB_STEP_SUMMARY

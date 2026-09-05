@@ -1,0 +1,17 @@
+# depool-forkd-blake2b — same image as stack/forkd-blake2b (its Dockerfile is
+# the source of this copy), built in CI from the STRIPPED Knots binaries
+# committed under release/forkd-bin/ (~11MB; the unstripped build tree never
+# travels). The stack's build-image.sh copies from a local Knots checkout —
+# CI has no checkout, so the stripped bytes ride in this repo. Regenerate by
+# re-running the Knots build + stack/forkd-blake2b/build-image.sh and
+# replacing these two files.
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libevent-core-2.1-7 libevent-extra-2.1-7 libevent-pthreads-2.1-7 \
+    && rm -rf /var/lib/apt/lists/*
+COPY bitcoind /usr/local/bin/bitcoind
+COPY bitcoin-cli /usr/local/bin/bitcoin-cli
+RUN mkdir -p /home/bitcoin/.bitcoin
+ENV HOME=/home/bitcoin
+EXPOSE 18443 18444
+ENTRYPOINT ["bitcoind"]

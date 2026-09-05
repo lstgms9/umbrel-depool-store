@@ -1,0 +1,8 @@
+# depool-control — the stack control sidecar + ONE extra file: the app's own
+# compose at /depool/docker-compose.yml. Control never ups/downs on Umbrel
+# (the lifecycle is umbrelOS's) — the file exists only so control's
+# `docker compose ps/exec` status + wallet calls, run with
+# COMPOSE_PROJECT_NAME=<app id>, resolve umbrelOS's own containers.
+ARG BASE=depool-stack-control:latest
+FROM ${BASE}
+COPY docker-compose.yml /depool/docker-compose.yml

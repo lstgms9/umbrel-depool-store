@@ -1,0 +1,7 @@
+# depool-bootstrap — the stack's one-shot channel bootstrap. The stack mounts
+# the checkout at /mod-btc:ro to reach stack/bootstrap.sh; an Umbrel box has
+# no checkout, so the script is baked into the cln base at the same path.
+# The compose entrypoint stays in the app compose, exactly like the stack.
+ARG BASE=depool-stack-cln-payer:latest
+FROM ${BASE}
+COPY stack/bootstrap.sh /mod-btc/stack/bootstrap.sh

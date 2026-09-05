@@ -1,0 +1,208 @@
+# depool-node — the depool stack as a one-click Umbrel app.
+#
+# This file WRAPS mod-btc/stack/docker-compose.yml + its launch-chain overlay
+# docker-compose.blake2b.yml (the exact two files the dev service stack runs —
+# verified against the live containers' com.docker.compose.project.config_files
+# label). It is the overlay merge FLATTENED — Umbrel runs one compose file, it
+# has no overlay mechanism. Services, images, commands and env are verbatim
+# from the merge; the ONLY deltas are the Umbrel bits:
+#   1. images from OUR registry (ghcr.io/lstgms9/*, pinned tags — Umbrel pulls,
+#      it never builds) — same bytes as `stack/build-images.sh` produces
+#   2. named volumes → binds under ${APP_DATA_DIR}/data (umbrelOS validates
+#      that app data lives there; uninstall/backup then behave)
+#   3. the /modules and /mod-btc HOST CHECKOUT MOUNTS are baked into the
+#      derived images (depool-sharechaind, depool-bootstrap) — an Umbrel box
+#      has no platform checkout; release/build-images.sh assembles the SAME
+#      reduced tree the tenant bundle ships (mod-btc routes.js /stack/bundle)
+#   4. box identity envs: the tenant bundle's values (RELAYS, DEPOOL_NETWORK,
+#      ORIGIN) plus HARDWARE_ID from ${APP_SEED} — umbrelOS exports it into
+#      the compose env (legacy-compat/app-script:234), deterministic per
+#      install, so claim-first pairing works untouched
+#   5. control gets COMPOSE_PROJECT_NAME=<app id> — umbrelOS composes every
+#      app under --project-name <app id>, and control's status/wallet calls
+#      are `docker compose ps/exec`, so the project name is what makes them
+#      hit umbrelOS's own containers
+# Everything else (start/stop/power UX) is umbrelOS's own app lifecycle —
+# see README.
+version: "3.7"
+
+services:
+  # the umbrelOS auth proxy — "Open" in the app drawer lands on the control
+  # API (the same 127.0.0.1:28700 JSON surface the bare-metal node page uses)
+  app_proxy:
+    environment:
+      APP_HOST: depool-node_control_1
+      APP_PORT: "28700"
+
+  # ── the mining chain: bitcoin-blake2b fork node (overlay forkd) ──
+  forkd:
+    image: ghcr.io/lstgms9/depool-forkd-blake2b:v0.1.0
+    command:
+      - "-regtest"
+      - "-server"
+      - "-printtoconsole"
+      - "-rpcuser=depool"
+      - "-rpcpassword=depool"
+      - "-rpcport=18443"
+      - "-rpcbind=0.0.0.0"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-fallbackfee=0.0002"
+      - "-blake2b_headline=depool launch"
+      - "-testactivationheight=blake2b@1"
+    volumes:
+      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin
+    restart: unless-stopped
+
+  # ── the settlement chain: stock sha256d bitcoind for CLN (overlay lnchain) ──
+  lnchain:
+    image: bitcoin/bitcoin:29
+    command: >
+      -regtest -server -printtoconsole
+      -rpcuser=depool -rpcpassword=depool -rpcport=18443
+      -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
+      -fallbackfee=0.0002
+    volumes:
+      - ${APP_DATA_DIR}/data/lnchain:/home/bitcoin/.bitcoin
+    restart: unless-stopped
+
+  cln-payer:
+    image: ghcr.io/lstgms9/depool-cln:v0.1.0
+    command: >
+      --network=regtest --lightning-dir=/root/.lightning-payer
+      --bitcoin-datadir=/home/bitcoin/.bitcoin
+      --bitcoin-cli=/usr/local/bin/bitcoin-cli
+      --bitcoin-rpcuser=depool --bitcoin-rpcpassword=depool
+      --bitcoin-rpcconnect=lnchain --bitcoin-rpcport=18443
+      --addr=0.0.0.0:9735 --disable-plugin=cln-grpc --log-level=info
+      --developer --dev-bitcoind-poll=1
+    volumes:
+      - ${APP_DATA_DIR}/data/cln-payer:/root/.lightning-payer
+      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin:ro
+    depends_on: [lnchain]
+    restart: unless-stopped
+
+  cln-payee:
+    image: ghcr.io/lstgms9/depool-cln:v0.1.0
+    command: >
+      --network=regtest --lightning-dir=/root/.lightning-payee
+      --bitcoin-datadir=/home/bitcoin/.bitcoin
+      --bitcoin-cli=/usr/local/bin/bitcoin-cli
+      --bitcoin-rpcuser=depool --bitcoin-rpcpassword=depool
+      --bitcoin-rpcconnect=lnchain --bitcoin-rpcport=18443
+      --addr=0.0.0.0:9735 --disable-plugin=cln-grpc --log-level=info
+      --developer --dev-bitcoind-poll=1
+    volumes:
+      - ${APP_DATA_DIR}/data/cln-payee:/root/.lightning-payee
+      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin:ro
+    depends_on: [lnchain]
+    restart: unless-stopped
+
+  bootstrap:
+    image: ghcr.io/lstgms9/depool-bootstrap:v0.1.0
+    entrypoint: ["/bin/sh", "/mod-btc/stack/bootstrap.sh"]
+    environment:
+      BOOTSTRAP_BCLI_ARGS: "-rpcconnect=lnchain"
+    volumes:
+      # base also bind-mounts forkdata ro — kept for merge parity; the script
+      # itself is pure CLI-over-RPC (BOOTSTRAP_BCLI_ARGS points it at lnchain)
+      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin:ro
+      - ${APP_DATA_DIR}/data/cln-payer:/root/.lightning-payer
+      - ${APP_DATA_DIR}/data/cln-payee:/root/.lightning-payee
+    depends_on: [lnchain, cln-payer, cln-payee]
+    restart: "no"
+
+  relay:
+    image: ghcr.io/lstgms9/depool-relay:v0.1.0
+    volumes:
+      - ${APP_DATA_DIR}/data/relay:/var/lib/strfry
+    ports:
+      # internal-only: an Umbrel node publishes beads to the POOL relay
+      # (RELAYS below), the local archive needs no LAN exposure
+      - "127.0.0.1:2085:7777"
+    restart: unless-stopped
+
+  sharechaind:
+    image: ghcr.io/lstgms9/depool-sharechaind:v0.1.0
+    cpus: 0.5
+    environment:
+      # the tenant bundle's values (routes.js /stack/bundle) — a customer
+      # Linux box gets the same four lines
+      RELAYS: wss://relay.hashoid.io
+      NETWORK: bip110-blake2b
+      DEPOOL_MODE: smooth
+      DEPOOL_POWER: low
+      # node role — the user's ASIC does the hashing, through stratum below
+      DEPOOL_GRIND: "0"
+      LOTTERY_BITS: "26"
+      LOTTERY_TARGET: "1"
+      POW_BITS: "21"
+      BEADS_TARGET: "6"
+      BLOCK_EVERY: "3"
+      CHAIN_RPC: http://forkd:18443
+      CHAIN_RPC_USER: depool
+      CHAIN_RPC_PASS: depool
+      CHAIN_KIND: blake2b
+      BLOCK_TRIES: "500000"
+      REWARD_SATS: "30000"
+      CLN_RPC: /run/cln/regtest/lightning-rpc
+      CLN_PAYEE_RPC: /run/cln-payee/regtest/lightning-rpc
+    volumes:
+      - ${APP_DATA_DIR}/data/miner:/data
+      - ${APP_DATA_DIR}/data/cln-payer:/run/cln
+      - ${APP_DATA_DIR}/data/cln-payee:/run/cln-payee
+    depends_on:
+      relay:
+        condition: service_started
+      bootstrap:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  control:
+    image: ghcr.io/lstgms9/depool-control:v0.1.0
+    environment:
+      ORIGIN: https://hashoid.io
+      # deterministic per-install (umbrelOS derives it from the store seed) —
+      # the box shows up unclaimed on the hashoid Mine page, the user names it
+      HARDWARE_ID: hw-umbrel-${APP_SEED}
+      NODE_HOST: ${DEVICE_HOSTNAME:-umbrel}
+      DEPOOL_POWER: low
+      NETWORK: bip110-blake2b
+      REWRITE_LOOPBACK: "1"
+      PRIME_HTTP: "28917"
+      # umbrelOS runs every app under --project-name <app id>; control's
+      # status/wallet are `docker compose ps/exec`, so THIS is the switch
+      # that makes them land on umbrelOS's own containers
+      COMPOSE_PROJECT_NAME: depool-node
+      COMPOSE_DIR: /depool
+      AUTOPAY_SERVICE_FEE: ""
+      SERVICE_FEE_CAP_PPM: "3000"
+      BILL_MS: "3600000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # /depool holds the SAME compose file (baked into the image at
+      # release time) — only a project-name/ps/exec reference, never used
+      # to up/down: the app lifecycle belongs to umbrelOS
+      - ${APP_DATA_DIR}/data/miner:/data
+    ports:
+      - "127.0.0.1:28700:28700"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - sharechaind
+    restart: unless-stopped
+
+  # ── P4 stratum — where the user's ASIC points (LAN-exposed on 3333) ──
+  stratum:
+    image: ghcr.io/lstgms9/depool-stratum:v0.1.0
+    environment:
+      STRATUM_PORT: "3333"
+      CHAIN_RPC: http://forkd:18443
+      CHAIN_RPC_USER: depool
+      CHAIN_RPC_PASS: depool
+      SHARE_DIFF: "1"
+    ports:
+      - "0.0.0.0:3333:3333"
+    volumes:
+      - ${APP_DATA_DIR}/data/miner:/data
+    depends_on: [forkd]
+    restart: unless-stopped

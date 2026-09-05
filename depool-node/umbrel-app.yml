@@ -1,0 +1,30 @@
+manifestVersion: 1
+id: depool-node
+category: bitcoin
+name: Depool Node
+version: 0.1.0
+tagline: Mine with your own node — no pool in the middle
+description: >-
+  Run the whole depool stack on your Umbrel: the Bitcoin-blake2b mining node,
+  a separate Lightning settlement chain, the sharechain daemon, an archival
+  relay, and a Stratum endpoint for your ASIC.
+
+
+  Install, point your ASIC at this box's LAN address on port 3333, and claim
+  your box on hashoid.io (Mine page) — the same pairing flow as a bare-metal
+  install. The box phones home by itself; payouts settle over Lightning.
+
+
+  Storage: the app keeps its own pruned chain data (about 10GB) under the
+  app's data dir, so uninstall and backup behave like any Umbrel app.
+releaseNotes: >-
+  First release of the depool node on the Umbrel community app store.
+developer: Depool
+website: https://depool.org
+repo: https://github.com/lstgms9/umbrel-depool-store
+support: https://depool.org
+port: 28700
+gallery:
+  - 1.jpg
+submitter: Depool
+submission: https://github.com/lstgms9/umbrel-depool-store

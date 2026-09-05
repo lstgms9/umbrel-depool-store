@@ -1,0 +1,2 @@
+id: "depool" # every app in this store starts with this prefix — hence "depool-node"
+name: "Depool"

@@ -1,0 +1,9 @@
+# depool-sharechaind — the Umbrel variant of the stack's sharechaind image.
+# The stack mounts the modules tree read-only at /modules (the daemon runs the
+# SAME source the repos carry — no vendored fork); an Umbrel box has no
+# checkout to mount, so THIS layer bakes exactly the reduced tree the tenant
+# bundle ships (mod-btc routes.js /stack/bundle) into the SAME base image.
+# release/build-images.sh assembles the tree and pins BASE.
+ARG BASE=depool-stack-sharechaind:latest
+FROM ${BASE}
+COPY modules /modules
