@@ -1,11 +1,16 @@
-# depool-control — the stack control sidecar + ONE extra file: the app's own
-# compose at /depool/docker-compose.yml. Control never ups/downs on Umbrel
-# (the lifecycle is umbrelOS's) — the file exists only so control's
-# `docker compose ps/exec` status + wallet calls, run with
-# COMPOSE_PROJECT_NAME=<app id>, resolve umbrelOS's own containers.
-ARG BASE=depool-stack-control:latest
-FROM ${BASE}
-COPY docker-compose.yml /depool/docker-compose.yml
+# depool-control — the stack control sidecar (docker CLI + compose plugin +
+# node on alpine) with the app's own compose baked at /depool/docker-
+# compose.yml. Control never ups/downs on Umbrel (the lifecycle is
+# umbrelOS's) — the file exists only so control's `docker compose ps/exec`
+# status + wallet calls, run with COMPOSE_PROJECT_NAME=<app id>, resolve
+# umbrelOS's own containers. Multi-arch: alpine:3.20 + apk packages are.
+FROM alpine:3.20
+RUN apk add --no-cache docker-cli docker-cli-compose nodejs
+COPY stack/control/control.js /control.js
+COPY stack/control/billing.js /billing.js
 # control reads power/mode/role from COMPOSE_DIR/.env — umbrelOS never
 # writes one, so the umbrel values are baked (node role, grind off)
 COPY control.env /depool/.env
+COPY docker-compose.yml /depool/docker-compose.yml
+EXPOSE 28700
+CMD ["node", "/control.js"]

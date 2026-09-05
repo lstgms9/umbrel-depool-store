@@ -1,22 +1,29 @@
-# release.yml — push the depool images for the app store to ghcr.io.
-# Manual: Actions → release → Run workflow (input: version, e.g. v0.1.1).
+# release.yml — push the depool images for the app store to ghcr.io,
+# MULTI-ARCH (linux/amd64 + linux/arm64 — most Umbrels are Raspberry Pis).
+# Manual: Actions → release → Run workflow (input: version, e.g. v0.2.0).
 #
 # Why CI and not the dev box: the dev box's fine-grained PAT cannot write
 # packages; this workflow's GITHUB_TOKEN gets packages:write for free.
-# Every input is a PUBLIC artifact the tenant already serves (the same two
-# URLs install.sh uses) plus the stripped Knots binaries committed under
-# release/forkd-bin/ — no platform checkout, no secrets.
+# Every input is a PUBLIC artifact the tenant already serves (the bundle
+# install.sh uses) — no platform checkout, no secrets, and since v0.2.0 no
+# images.tar.gz either: everything builds FROM SOURCE under buildx, so both
+# architectures come from the same Dockerfiles.
 #
-# ONE-TIME after the first run: flip the seven ghcr packages public
-# (github.com/lstgms9?tab=packages → each → Package settings → visibility).
-# umbrelOS pulls anonymously, so private packages would 403 for users.
-# Subsequent releases keep the visibility you set.
+# Image set (v0.2.0, mainnet-first — the app's compose is the contract):
+#   depool-cln          CLN + env-driven bitcoin-cli wrapper (multi-arch bases)
+#   depool-bootstrap    regtest-only one-shot (dev overlay; not in the app)
+#   depool-sharechaind  node:20-slim + baked modules tree
+#   depool-control      alpine + docker-cli/compose + baked app compose
+#   depool-stratum      node:20-slim (bundle Dockerfile)
+#   depool-relay        strfry 1.1.1 source build (arm64 under qemu)
+# The chain node itself is upstream bitcoin/bitcoin:29 — multi-arch already,
+# referenced directly by the app compose, nothing for us to build.
 name: release
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'image version tag, e.g. v0.1.0'
+        description: 'image version tag, e.g. v0.2.0'
         required: true
 permissions:
   contents: write
@@ -28,17 +35,13 @@ jobs:
       VER: ${{ inputs.version }}
       GH: ghcr.io/lstgms9
       ORIGIN: https://hashoid.io
+      IMAGES: depool-cln depool-bootstrap depool-sharechaind depool-control depool-stratum depool-relay
     steps:
       - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3        # arm64 emulation for the source builds
+      - uses: docker/setup-buildx-action@v3
 
-      # ── the six stack images, exactly the tarball install.sh loads ──
-      - name: Load the stack images
-        run: |
-          curl -fsSL "$ORIGIN/api/btc/stack/images.tar.gz" -o images.tgz
-          docker load -i images.tgz
-          docker images --format '{{.Repository}}:{{.Tag}}' | grep depool-stack
-
-      # ── the reduced modules tree + bootstrap.sh, from the same bundle ──
+      # ── the reduced modules tree + stack sources, from the same bundle ──
       - name: Fetch the tenant bundle
         run: |
           curl -fsSL "$ORIGIN/api/btc/stack/bundle" -o bundle.tgz
@@ -46,47 +49,40 @@ jobs:
           cp depool-node/docker-compose.yml bundle/docker-compose.yml
           cp release/control.env bundle/control.env
           ls bundle/modules/mod-btc/lib bundle/modules/mod-chat/lib
+          # strfry's source build pins -j2; under qemu any parallelism helps
+          sed -i 's/make -j2/make -j$(nproc)/' bundle/stack/relay/Dockerfile
 
-      - name: Build the seven app images
+      - name: Login to ghcr
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      # ── build both architectures FROM SOURCE, push as one manifest list ──
+      - name: Build + push the six images (amd64 + arm64)
         run: |
           set -e
-          docker build --build-arg BASE=depool-stack-cln-payer:latest \
-            -f release/Dockerfile.bootstrap-umbrel -t $GH/depool-bootstrap:$VER bundle
-          docker build --build-arg BASE=depool-stack-sharechaind:latest \
-            -f release/Dockerfile.sharechaind-umbrel -t $GH/depool-sharechaind:$VER bundle
-          docker build --build-arg BASE=depool-stack-control:latest \
-            -f release/Dockerfile.control-umbrel -t $GH/depool-control:$VER bundle
-          docker tag depool-stack-cln-payer:latest   $GH/depool-cln:$VER
-          docker tag depool-stack-relay:latest       $GH/depool-relay:$VER
-          # the tarball never carried stratum: customer boxes build it from the
-          # bundle (install.sh's --build leg) — CI does the same
-          docker build -f bundle/stack/stratum/Dockerfile -t depool-stack-stratum:latest bundle/stack/stratum
-          docker tag depool-stack-stratum:latest     $GH/depool-stratum:$VER
-          docker build -f release/Dockerfile.forkd-umbrel -t $GH/depool-forkd-blake2b:$VER release/forkd-bin
+          bx() { docker buildx build --platform linux/amd64,linux/arm64 --push "$@"; }
+          bx -f release/Dockerfile.cln-umbrel        -t $GH/depool-cln:$VER        bundle
+          bx -f release/Dockerfile.bootstrap-umbrel  -t $GH/depool-bootstrap:$VER  bundle
+          bx -f release/Dockerfile.sharechaind-umbrel -t $GH/depool-sharechaind:$VER bundle
+          bx -f release/Dockerfile.control-umbrel    -t $GH/depool-control:$VER    bundle
+          bx -f bundle/stack/stratum/Dockerfile      -t $GH/depool-stratum:$VER    bundle/stack/stratum
+          bx -f bundle/stack/relay/Dockerfile        -t $GH/depool-relay:$VER      bundle/stack/relay
 
-      - name: Push
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          for img in depool-forkd-blake2b depool-cln depool-relay depool-stratum \
-                     depool-sharechaind depool-control depool-bootstrap; do
-            docker push $GH/$img:$VER
-          done
-
-      # the version pins in the app compose must match what we just pushed
+      # ── the version pins in the app compose must match what we just pushed ──
       - name: Pin the compose + lock
         run: |
-          for img in depool-forkd-blake2b depool-cln depool-relay depool-stratum \
-                     depool-sharechaind depool-control depool-bootstrap; do
+          set -e
+          for img in $IMAGES; do
             sed -i "s#ghcr.io/lstgms9/$img:v[0-9.]*#ghcr.io/lstgms9/$img:$VER#g" depool-node/docker-compose.yml
           done
           node -e '
             const fs = require("fs"), { execSync } = require("child_process");
-            const names = ["depool-forkd-blake2b","depool-cln","depool-relay","depool-stratum",
-                           "depool-sharechaind","depool-control","depool-bootstrap"];
+            const names = process.env.IMAGES.split(" ");
             const ver = process.env.VER, gh = process.env.GH;
             const lock = {};
             for (const n of names) {
-              const d = execSync(`docker inspect --format "{{index .RepoDigests 0}}" ${gh}/${n}:${ver}`).toString().trim().split("@")[1] || "";
+              // the MANIFEST LIST digest — what an arm64 pull resolves through
+              const d = execSync(`docker buildx imagetools inspect ${gh}/${n}:${ver}`)
+                .toString().match(/Digest:\s*(sha256:[0-9a-f]+)/)[1];
               lock[n] = { tag: ver, digest: d };
             }
             fs.writeFileSync("release/images-lock.json", JSON.stringify(lock, null, 1) + "\n");
@@ -94,13 +90,12 @@ jobs:
           git config user.name "depublish-bot"
           git config user.email "actions@users.noreply.github.com"
           git add depool-node/docker-compose.yml release/images-lock.json
-          git commit -m "[release] $VER images pushed + pinned" || echo "nothing to commit"
+          git commit -m "[release] $VER images pushed + pinned (amd64+arm64)" || echo "nothing to commit"
           git push
 
       - name: Summary
         run: |
-          for img in depool-forkd-blake2b depool-cln depool-relay depool-stratum \
-                     depool-sharechaind depool-control depool-bootstrap; do
-            echo "$GH/$img:$VER pushed" >> $GITHUB_STEP_SUMMARY
+          for img in $IMAGES; do
+            echo "$GH/$img:$VER pushed (linux/amd64 + linux/arm64)" >> $GITHUB_STEP_SUMMARY
           done
-          echo "ONE-TIME: flip the seven packages public at github.com/lstgms9?tab=packages" >> $GITHUB_STEP_SUMMARY
+          echo "arm64 strfry builds under qemu — this step is the slow one" >> $GITHUB_STEP_SUMMARY

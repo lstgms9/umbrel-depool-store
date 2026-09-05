@@ -1,0 +1,101 @@
+# docker-compose.regtest.yml — the TEST overlay for the app compose. Never
+# shipped: umbrelOS runs depool-node/docker-compose.yml alone; this file
+# exists so the dev harness (tests/harness.sh) can prove the wrap's MECHANICS
+# — GBT templates, share validation, the funded payer→payee channel, BOLT12
+# payouts — on a chain that actually produces blocks, with the SAME service
+# definitions the app ships.
+#
+#   docker compose -f depool-node/docker-compose.yml \
+#                  -f depool-node/docker-compose.regtest.yml up
+#
+# It is the mod-btc stack's own blake2b overlay idea, retargeted at this app:
+# bitcoind becomes the bitcoin-blake2b regtest fork (cheap blocks), CLN runs
+# regtest with dev poll, the bootstrap one-shot funds + opens the channel,
+# and the daemon/stratum point at the regtest RPC. Mainnet values in the app
+# file are overridden, never edited.
+services:
+  # the mining chain: bitcoin-blake2b fork node (regtest — the cheap test
+  # ground; v0.1.0-era amd64 image, dev harness only)
+  bitcoind:
+    image: ghcr.io/lstgms9/depool-forkd-blake2b:v0.1.0
+    command:
+      - "-regtest"
+      - "-server"
+      - "-printtoconsole"
+      - "-rpcuser=depool"
+      - "-rpcpassword=depool"
+      - "-rpcport=18443"
+      - "-rpcbind=0.0.0.0"
+      - "-rpcallowip=0.0.0.0/0"
+      - "-fallbackfee=0.0002"
+      - "-blake2b_headline=depool launch"
+      - "-testactivationheight=blake2b@1"
+
+  cln-payer:
+    command: >
+      --network=regtest --lightning-dir=/root/.lightning-payer
+      --bitcoin-datadir=/home/bitcoin/.bitcoin
+      --bitcoin-cli=/usr/local/bin/bitcoin-cli
+      --bitcoin-rpcuser=depool --bitcoin-rpcpassword=depool
+      --bitcoin-rpcconnect=bitcoind --bitcoin-rpcport=18443
+      --addr=0.0.0.0:9735 --disable-plugin=cln-grpc --log-level=info
+      --developer --dev-bitcoind-poll=1
+    environment:
+      BCLI_CONNECT: bitcoind
+      BCLI_PORT: "18443"
+
+  cln-payee:
+    command: >
+      --network=regtest --lightning-dir=/root/.lightning-payee
+      --bitcoin-datadir=/home/bitcoin/.bitcoin
+      --bitcoin-cli=/usr/local/bin/bitcoin-cli
+      --bitcoin-rpcuser=depool --bitcoin-rpcpassword=depool
+      --bitcoin-rpcconnect=bitcoind --bitcoin-rpcport=18443
+      --addr=0.0.0.0:9735 --disable-plugin=cln-grpc --log-level=info
+      --developer --dev-bitcoind-poll=1
+    environment:
+      BCLI_CONNECT: bitcoind
+      BCLI_PORT: "18443"
+
+  # the one-shot: fund the payer, open payer→payee (the app has no such
+  # service — mainnet onboarding is the user depositing real sats)
+  bootstrap:
+    image: ghcr.io/lstgms9/depool-bootstrap:v0.2.0
+    entrypoint: ["/bin/sh", "/mod-btc/stack/bootstrap.sh"]
+    environment:
+      BOOTSTRAP_BCLI_ARGS: "-rpcconnect=bitcoind -rpcport=18443 -rpcuser=depool -rpcpassword=depool"
+    volumes:
+      - ${APP_DATA_DIR}/data/cln-payer:/root/.lightning-payer
+      - ${APP_DATA_DIR}/data/cln-payee:/root/.lightning-payee
+    depends_on: [bitcoind, cln-payer, cln-payee]
+    restart: "no"
+
+  sharechaind:
+    environment:
+      # local relay + a throwaway network tag: regtest shares must never
+      # touch the pool relay or the live "bitcoin" cohort
+      RELAYS: ws://relay:7777
+      NETWORK: depool-umbrel-regtest
+      CHAIN_RPC: http://bitcoind:18443
+      CHAIN_KIND: blake2b
+      CLN_RPC: /run/cln/regtest/lightning-rpc
+      CLN_PAYEE_RPC: /run/cln-payee/regtest/lightning-rpc
+    depends_on:
+      relay:
+        condition: service_started
+      cln-payer:
+        condition: service_started
+      cln-payee:
+        condition: service_started
+      bootstrap:
+        condition: service_completed_successfully
+
+  control:
+    environment:
+      # regtest rails (the app file's mainnet values are overridden)
+      BC_ARGS: -regtest -rpcuser=depool -rpcpassword=depool -rpcport=18443
+      CLN_NET: regtest
+
+  stratum:
+    environment:
+      CHAIN_RPC: http://bitcoind:18443

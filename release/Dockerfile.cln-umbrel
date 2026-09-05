@@ -1,0 +1,12 @@
+# depool-cln — CLN + bitcoin-cli in one image, multi-arch (both bases ship
+# amd64 + arm64 manifests). Same recipe as stack/lightning/Dockerfile, with
+# the wrapper's target ENV-DRIVEN: CLN's bcli startup check calls bare
+# bitcoin-cli and you can't pass it creds, so the wrapper carries them — and
+# now the connect/port come from the compose env, so the SAME image serves
+# the mainnet app (bitcoind:8332) and the regtest dev overlay (:18443).
+FROM bitcoin/bitcoin:29 AS btc
+FROM elementsproject/lightningd:latest
+COPY --from=btc /opt/bitcoin-*/bin/bitcoin-cli /usr/local/bin/bitcoin-cli-real
+ENV BCLI_CONNECT=bitcoind BCLI_PORT=8332 BCLI_USER=depool BCLI_PASS=depool
+RUN printf '#!/bin/sh\nexec /usr/local/bin/bitcoin-cli-real -rpcconnect="${BCLI_CONNECT:-bitcoind}" -rpcport="${BCLI_PORT:-8332}" -rpcuser="${BCLI_USER:-depool}" -rpcpassword="${BCLI_PASS:-depool}" "$@"\n' > /usr/local/bin/bitcoin-cli \
+ && chmod +x /usr/local/bin/bitcoin-cli

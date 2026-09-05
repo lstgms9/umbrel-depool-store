@@ -1,30 +1,26 @@
 {
- "depool-forkd-blake2b": {
-  "tag": "v0.1.0",
-  "digest": "sha256:32b0e9e6e8c4e08cdc70f9c28f5208012390be4a55bffaa47d5d98566050af5e"
- },
  "depool-cln": {
-  "tag": "v0.1.0",
-  "digest": "sha256:5d0326dfda81a2a938290e2ab9448c9055fb43ceeb22264688a3e42bd90a28a4"
- },
- "depool-relay": {
-  "tag": "v0.1.0",
-  "digest": "sha256:e701ab5044c25e7c78d95cd0bfd37b405afd647977b8a95918fbe2e3fd8b0de4"
- },
- "depool-stratum": {
-  "tag": "v0.1.0",
-  "digest": "sha256:5ac55e40288f2ffca128b49c1ddca005db3704783cfd233effba3c4581c60dd7"
- },
- "depool-sharechaind": {
-  "tag": "v0.1.0",
-  "digest": "sha256:df1a29526802a2fcc739baae55fdc5d65145e545b6799cd180d928b492b2f048"
- },
- "depool-control": {
-  "tag": "v0.1.0",
-  "digest": "sha256:9207fb0ca5a27302cabd303ccca21fb1febe283a4245e6442f461c1b26f10028"
+  "tag": "v0.2.0",
+  "digest": "pending-release"
  },
  "depool-bootstrap": {
-  "tag": "v0.1.0",
-  "digest": "sha256:c4395cd11e6f370d1d0b170b283819be08dafd3f897a82c2b00b6b9e9a1cad3a"
+  "tag": "v0.2.0",
+  "digest": "pending-release"
+ },
+ "depool-sharechaind": {
+  "tag": "v0.2.0",
+  "digest": "pending-release"
+ },
+ "depool-control": {
+  "tag": "v0.2.0",
+  "digest": "pending-release"
+ },
+ "depool-stratum": {
+  "tag": "v0.2.0",
+  "digest": "pending-release"
+ },
+ "depool-relay": {
+  "tag": "v0.2.0",
+  "digest": "pending-release"
  }
 }

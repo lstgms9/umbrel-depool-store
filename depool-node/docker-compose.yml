@@ -1,29 +1,41 @@
 # depool-node — the depool stack as a one-click Umbrel app.
 #
-# This file WRAPS mod-btc/stack/docker-compose.yml + its launch-chain overlay
-# docker-compose.blake2b.yml (the exact two files the dev service stack runs —
-# verified against the live containers' com.docker.compose.project.config_files
-# label). It is the overlay merge FLATTENED — Umbrel runs one compose file, it
-# has no overlay mechanism. Services, images, commands and env are verbatim
-# from the merge; the ONLY deltas are the Umbrel bits:
-#   1. images from OUR registry (ghcr.io/lstgms9/*, pinned tags — Umbrel pulls,
-#      it never builds) — same bytes as `stack/build-images.sh` produces
-#   2. named volumes → binds under ${APP_DATA_DIR}/data (umbrelOS validates
-#      that app data lives there; uninstall/backup then behave)
-#   3. the /modules and /mod-btc HOST CHECKOUT MOUNTS are baked into the
-#      derived images (depool-sharechaind, depool-bootstrap) — an Umbrel box
-#      has no platform checkout; release/build-images.sh assembles the SAME
-#      reduced tree the tenant bundle ships (mod-btc routes.js /stack/bundle)
-#   4. box identity envs: the tenant bundle's values (RELAYS, DEPOOL_NETWORK,
-#      ORIGIN) plus HARDWARE_ID from ${APP_SEED} — umbrelOS exports it into
-#      the compose env (legacy-compat/app-script:234), deterministic per
-#      install, so claim-first pairing works untouched
+# v0.2.0 — MAINNET-FIRST (Damon 2026-08-31 spec reframe: "depool is a
+# payout-coordination protocol for any SHA-256 Bitcoin, mainnet-first.
+# There is no depool chain"). The blake2b fork was the cheap test ground;
+# THIS app mines real Bitcoin:
+#   bitcoind     the box's own FULL-VALIDATING pruned mainnet node — the
+#                template source (getblocktemplate) for the ASIC's shares
+#                AND the Lightning settlement chain (ONE chain, not two)
+#   cln          real-sats Lightning; payouts from the pool prime land on
+#                the miner's BOLT12 offer
+#   stratum      where the ASIC points (LAN :3333); builds jobs from the
+#                box's OWN bitcoind — template sovereignty, your node your
+#                rules (spec §7.1)
+#   sharechaind  the bead DAG + payout commitment, network tag "bitcoin"
+#   relay        local archival relay; the pool relay (relay.hashoid.io)
+#                carries the live shares
+#   control      the node page + the hashoid heartbeat (claim-first pairing)
+# No bootstrap one-shot: nothing to fund on mainnet — the user deposits
+# real sats through the on-chain card (control /onchain) when they want the
+# payout rail loaded. There is no blake2b, no regtest, no fork anywhere in
+# this file.
+#
+# Umbrel deltas (why this file differs from mod-btc/stack/docker-compose.yml):
+#   1. images: pinned ghcr.io/lstgms9/* (built multi-arch by the repo's
+#      release workflow) + upstream bitcoin/bitcoin:29 (multi-arch) —
+#      Umbrel pulls, it never builds
+#   2. volumes: binds under ${APP_DATA_DIR}/data (umbrelOS validates)
+#   3. the /modules tree is BAKED into depool-sharechaind (an Umbrel box has
+#      no platform checkout)
+#   4. box identity: HARDWARE_ID from ${APP_SEED} (deterministic per
+#      install) — claim-first pairing works untouched
 #   5. control gets COMPOSE_PROJECT_NAME=<app id> — umbrelOS composes every
 #      app under --project-name <app id>, and control's status/wallet calls
-#      are `docker compose ps/exec`, so the project name is what makes them
-#      hit umbrelOS's own containers
-# Everything else (start/stop/power UX) is umbrelOS's own app lifecycle —
-# see README.
+#      are `docker compose ps/exec`, so THIS is what lands them on
+#      umbrelOS's own containers
+# A regtest overlay for dev/harness lives beside this file
+# (docker-compose.regtest.yml) — umbrelOS never sees it.
 version: "3.7"
 
 services:
@@ -34,101 +46,85 @@ services:
       APP_HOST: depool-node_control_1
       APP_PORT: "28700"
 
-  # ── the mining chain: bitcoin-blake2b fork node (overlay forkd) ──
-  forkd:
-    image: ghcr.io/lstgms9/depool-forkd-blake2b:v0.1.0
-    command:
-      - "-regtest"
-      - "-server"
-      - "-printtoconsole"
-      - "-rpcuser=depool"
-      - "-rpcpassword=depool"
-      - "-rpcport=18443"
-      - "-rpcbind=0.0.0.0"
-      - "-rpcallowip=0.0.0.0/0"
-      - "-fallbackfee=0.0002"
-      - "-blake2b_headline=depool launch"
-      - "-testactivationheight=blake2b@1"
-    volumes:
-      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin
-    restart: unless-stopped
-
-  # ── the settlement chain: stock sha256d bitcoind for CLN (overlay lnchain) ──
-  lnchain:
+  # ── the chain: the box's own pruned mainnet Bitcoin node ──
+  # Full validation (~10GB kept with prune=10000; initial sync takes days on
+  # a Pi — that is Bitcoin being Bitcoin, the app is honest about it). One
+  # chain serves BOTH the mining templates (stratum/sharechaind getblock-
+  # template) and Lightning settlement (CLN) — the two-chain split was the
+  # fork test ground's, not the design.
+  bitcoind:
     image: bitcoin/bitcoin:29
     command: >
-      -regtest -server -printtoconsole
-      -rpcuser=depool -rpcpassword=depool -rpcport=18443
+      -server -printtoconsole
+      -prune=10000
+      -rpcuser=depool -rpcpassword=depool
       -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
       -fallbackfee=0.0002
     volumes:
-      - ${APP_DATA_DIR}/data/lnchain:/home/bitcoin/.bitcoin
+      - ${APP_DATA_DIR}/data/chain:/home/bitcoin/.bitcoin
     restart: unless-stopped
 
+  # ── Lightning (real sats): the miner's payout rail ──
+  # cln-payer and cln-payee as on the stack; on mainnet no --developer, and
+  # bitcoin-retry-timeout covers the days-long chain sync. The bitcoin-cli
+  # wrapper inside the image targets bitcoind:8332 via env (BCLI_*), so the
+  # same image also serves the regtest dev overlay.
   cln-payer:
-    image: ghcr.io/lstgms9/depool-cln:v0.1.0
+    image: ghcr.io/lstgms9/depool-cln:v0.2.0
     command: >
-      --network=regtest --lightning-dir=/root/.lightning-payer
+      --network=bitcoin --lightning-dir=/root/.lightning-payer
       --bitcoin-datadir=/home/bitcoin/.bitcoin
       --bitcoin-cli=/usr/local/bin/bitcoin-cli
       --bitcoin-rpcuser=depool --bitcoin-rpcpassword=depool
-      --bitcoin-rpcconnect=lnchain --bitcoin-rpcport=18443
+      --bitcoin-rpcconnect=bitcoind --bitcoin-rpcport=8332
+      --bitcoin-retry-timeout=3600
       --addr=0.0.0.0:9735 --disable-plugin=cln-grpc --log-level=info
-      --developer --dev-bitcoind-poll=1
+    environment:
+      BCLI_CONNECT: bitcoind
+      BCLI_PORT: "8332"
     volumes:
       - ${APP_DATA_DIR}/data/cln-payer:/root/.lightning-payer
-      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin:ro
-    depends_on: [lnchain]
+      - ${APP_DATA_DIR}/data/chain:/home/bitcoin/.bitcoin:ro
+    depends_on: [bitcoind]
     restart: unless-stopped
 
   cln-payee:
-    image: ghcr.io/lstgms9/depool-cln:v0.1.0
+    image: ghcr.io/lstgms9/depool-cln:v0.2.0
     command: >
-      --network=regtest --lightning-dir=/root/.lightning-payee
+      --network=bitcoin --lightning-dir=/root/.lightning-payee
       --bitcoin-datadir=/home/bitcoin/.bitcoin
       --bitcoin-cli=/usr/local/bin/bitcoin-cli
       --bitcoin-rpcuser=depool --bitcoin-rpcpassword=depool
-      --bitcoin-rpcconnect=lnchain --bitcoin-rpcport=18443
+      --bitcoin-rpcconnect=bitcoind --bitcoin-rpcport=8332
+      --bitcoin-retry-timeout=3600
       --addr=0.0.0.0:9735 --disable-plugin=cln-grpc --log-level=info
-      --developer --dev-bitcoind-poll=1
+    environment:
+      BCLI_CONNECT: bitcoind
+      BCLI_PORT: "8332"
     volumes:
       - ${APP_DATA_DIR}/data/cln-payee:/root/.lightning-payee
-      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin:ro
-    depends_on: [lnchain]
+      - ${APP_DATA_DIR}/data/chain:/home/bitcoin/.bitcoin:ro
+    depends_on: [bitcoind]
     restart: unless-stopped
 
-  bootstrap:
-    image: ghcr.io/lstgms9/depool-bootstrap:v0.1.0
-    entrypoint: ["/bin/sh", "/mod-btc/stack/bootstrap.sh"]
-    environment:
-      BOOTSTRAP_BCLI_ARGS: "-rpcconnect=lnchain"
-    volumes:
-      # base also bind-mounts forkdata ro — kept for merge parity; the script
-      # itself is pure CLI-over-RPC (BOOTSTRAP_BCLI_ARGS points it at lnchain)
-      - ${APP_DATA_DIR}/data/forkd:/home/bitcoin/.bitcoin:ro
-      - ${APP_DATA_DIR}/data/cln-payer:/root/.lightning-payer
-      - ${APP_DATA_DIR}/data/cln-payee:/root/.lightning-payee
-    depends_on: [lnchain, cln-payer, cln-payee]
-    restart: "no"
-
+  # local archival relay (loopback only — live shares ride the pool relay)
   relay:
-    image: ghcr.io/lstgms9/depool-relay:v0.1.0
+    image: ghcr.io/lstgms9/depool-relay:v0.2.0
     volumes:
       - ${APP_DATA_DIR}/data/relay:/var/lib/strfry
     ports:
-      # internal-only: an Umbrel node publishes beads to the POOL relay
-      # (RELAYS below), the local archive needs no LAN exposure
       - "127.0.0.1:2085:7777"
     restart: unless-stopped
 
+  # ── the sharechain daemon — the bead DAG + payout commitment ──
   sharechaind:
-    image: ghcr.io/lstgms9/depool-sharechaind:v0.1.0
+    image: ghcr.io/lstgms9/depool-sharechaind:v0.2.0
     cpus: 0.5
     environment:
-      # the tenant bundle's values (routes.js /stack/bundle) — a customer
-      # Linux box gets the same four lines
+      # the tenant bundle's values with the MAINNET network tag (spec: the
+      # network names the chain being mined; default "bitcoin")
       RELAYS: wss://relay.hashoid.io
-      NETWORK: bip110-blake2b
+      NETWORK: bitcoin
       DEPOOL_MODE: smooth
       DEPOOL_POWER: low
       # node role — the user's ASIC does the hashing, through stratum below
@@ -138,14 +134,14 @@ services:
       POW_BITS: "21"
       BEADS_TARGET: "6"
       BLOCK_EVERY: "3"
-      CHAIN_RPC: http://forkd:18443
+      CHAIN_RPC: http://bitcoind:8332
       CHAIN_RPC_USER: depool
       CHAIN_RPC_PASS: depool
-      CHAIN_KIND: blake2b
+      CHAIN_KIND: sha256d
       BLOCK_TRIES: "500000"
       REWARD_SATS: "30000"
-      CLN_RPC: /run/cln/regtest/lightning-rpc
-      CLN_PAYEE_RPC: /run/cln-payee/regtest/lightning-rpc
+      CLN_RPC: /run/cln/bitcoin/lightning-rpc
+      CLN_PAYEE_RPC: /run/cln-payee/bitcoin/lightning-rpc
     volumes:
       - ${APP_DATA_DIR}/data/miner:/data
       - ${APP_DATA_DIR}/data/cln-payer:/run/cln
@@ -153,12 +149,14 @@ services:
     depends_on:
       relay:
         condition: service_started
-      bootstrap:
-        condition: service_completed_successfully
+      cln-payer:
+        condition: service_started
+      cln-payee:
+        condition: service_started
     restart: unless-stopped
 
   control:
-    image: ghcr.io/lstgms9/depool-control:v0.1.0
+    image: ghcr.io/lstgms9/depool-control:v0.2.0
     environment:
       ORIGIN: https://hashoid.io
       # deterministic per-install (umbrelOS derives it from the store seed) —
@@ -166,9 +164,14 @@ services:
       HARDWARE_ID: hw-umbrel-${APP_SEED}
       NODE_HOST: ${DEVICE_HOSTNAME:-umbrel}
       DEPOOL_POWER: low
-      NETWORK: bip110-blake2b
+      NETWORK: bitcoin
       REWRITE_LOOPBACK: "1"
       PRIME_HTTP: "28917"
+      # the chain rails retargeted to MAINNET (control.js envs): the bitcoin
+      # container, no -regtest, port 8332, CLN on the bitcoin network dir
+      CHAIN_SVC: bitcoind
+      BC_ARGS: -rpcuser=depool -rpcpassword=depool -rpcport=8332
+      CLN_NET: bitcoin
       # umbrelOS runs every app under --project-name <app id>; control's
       # status/wallet are `docker compose ps/exec`, so THIS is the switch
       # that makes them land on umbrelOS's own containers
@@ -191,12 +194,15 @@ services:
       - sharechaind
     restart: unless-stopped
 
-  # ── P4 stratum — where the user's ASIC points (LAN-exposed on 3333) ──
+  # ── stratum — where the user's ASIC points (LAN-exposed on 3333) ──
+  # Jobs come from THIS box's bitcoind via getblocktemplate: the user mines
+  # their own templates (spec §7.1 template sovereignty), shares join the
+  # sharechain, blocks submit straight back to the network.
   stratum:
-    image: ghcr.io/lstgms9/depool-stratum:v0.1.0
+    image: ghcr.io/lstgms9/depool-stratum:v0.2.0
     environment:
       STRATUM_PORT: "3333"
-      CHAIN_RPC: http://forkd:18443
+      CHAIN_RPC: http://bitcoind:8332
       CHAIN_RPC_USER: depool
       CHAIN_RPC_PASS: depool
       SHARE_DIFF: "1"
@@ -204,5 +210,5 @@ services:
       - "0.0.0.0:3333:3333"
     volumes:
       - ${APP_DATA_DIR}/data/miner:/data
-    depends_on: [forkd]
+    depends_on: [bitcoind]
     restart: unless-stopped

@@ -1,7 +1,10 @@
-# depool-bootstrap — the stack's one-shot channel bootstrap. The stack mounts
-# the checkout at /mod-btc:ro to reach stack/bootstrap.sh; an Umbrel box has
-# no checkout, so the script is baked into the cln base at the same path.
-# The compose entrypoint stays in the app compose, exactly like the stack.
-ARG BASE=depool-stack-cln-payer:latest
-FROM ${BASE}
+# depool-bootstrap — the stack's one-shot regtest channel bootstrap
+# (fund payer, open payer→payee). The MAINNET app has no such service —
+# mainnet onboarding is the user depositing real sats — so this image exists
+# only for the dev overlay (docker-compose.regtest.yml). Real bitcoin-cli
+# (no wrapper: the script points it at the chain through BOOTSTRAP_BCLI_ARGS),
+# the script baked at the path the compose entrypoint expects.
+FROM bitcoin/bitcoin:29 AS btc
+FROM elementsproject/lightningd:latest
+COPY --from=btc /opt/bitcoin-*/bin/bitcoin-cli /usr/local/bin/bitcoin-cli
 COPY stack/bootstrap.sh /mod-btc/stack/bootstrap.sh

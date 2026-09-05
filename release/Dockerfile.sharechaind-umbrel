@@ -1,9 +1,24 @@
-# depool-sharechaind — the Umbrel variant of the stack's sharechaind image.
-# The stack mounts the modules tree read-only at /modules (the daemon runs the
-# SAME source the repos carry — no vendored fork); an Umbrel box has no
-# checkout to mount, so THIS layer bakes exactly the reduced tree the tenant
-# bundle ships (mod-btc routes.js /stack/bundle) into the SAME base image.
-# release/build-images.sh assembles the tree and pins BASE.
-ARG BASE=depool-stack-sharechaind:latest
-FROM ${BASE}
+# depool-sharechaind — the stack's sharechaind image (node + ws + daemon)
+# with ONE Umbrel delta: the modules tree is BAKED instead of bind-mounted,
+# because an Umbrel box has no platform checkout. The tree is the SAME
+# reduced set the tenant bundle ships (mod-btc routes.js /stack/bundle) —
+# sharechaind's /modules mount needs exactly this.
+# Built straight from the bundle sources (multi-arch; node:20-slim is
+# multi-arch) — no dependency on the amd64-only images tarball.
+FROM node:20-slim
+WORKDIR /app
+RUN npm install --omit=dev ws@8
+# mod-chat/lib/nostrshare.js resolves deps via lib/resolve-dep.js: normal
+# require first, the host tree second. A bare require('ws') from mod-chat/lib
+# never reaches /app — NODE_PATH is how ws lands on its search path.
+ENV NODE_PATH=/app/node_modules
+
+COPY stack/sharechaind/daemon.js /app/daemon.js
+COPY stack/sharechaind/payer.js /app/payer.js
+COPY stack/sharechaind/chain.js /app/chain.js
+COPY stack/sharechaind/chainV2.js /app/chainV2.js
+COPY stack/sharechaind/blake2bchain.js /app/blake2bchain.js
 COPY modules /modules
+ENV DATA_DIR=/data
+VOLUME /data
+CMD ["node", "/app/daemon.js"]
