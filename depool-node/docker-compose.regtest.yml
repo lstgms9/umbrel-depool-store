@@ -2,34 +2,24 @@
 # shipped: umbrelOS runs depool-node/docker-compose.yml alone; this file
 # exists so the dev harness (tests/harness.sh) can prove the wrap's MECHANICS
 # — GBT templates, share validation, the funded payer→payee channel, BOLT12
-# payouts — on a chain that actually produces blocks, with the SAME service
-# definitions the app ships.
+# payouts — on a chain that actually produces blocks.
 #
 #   docker compose -f depool-node/docker-compose.yml \
 #                  -f depool-node/docker-compose.regtest.yml up
 #
-# It is the mod-btc stack's own blake2b overlay idea, retargeted at this app:
-# bitcoind becomes the bitcoin-blake2b regtest fork (cheap blocks), CLN runs
-# regtest with dev poll, the bootstrap one-shot funds + opens the channel,
-# and the daemon/stratum point at the regtest RPC. Mainnet values in the app
-# file are overridden, never edited.
+# ONE chain, exactly like the app: the SAME stock bitcoind image drops to
+# -regtest, and mining templates AND Lightning settlement ride it — the
+# mainnet shape, just with cheap blocks. The old blake2b fork overlay is gone
+# with the fork itself: stock CLN cannot parse fork v2 blocks ("bad block"),
+# and the app has no fork to test. Mainnet values in the app file are
+# overridden, never edited.
 services:
-  # the mining chain: bitcoin-blake2b fork node (regtest — the cheap test
-  # ground; v0.1.0-era amd64 image, dev harness only)
   bitcoind:
-    image: ghcr.io/lstgms9/depool-forkd-blake2b:v0.1.0
-    command:
-      - "-regtest"
-      - "-server"
-      - "-printtoconsole"
-      - "-rpcuser=depool"
-      - "-rpcpassword=depool"
-      - "-rpcport=18443"
-      - "-rpcbind=0.0.0.0"
-      - "-rpcallowip=0.0.0.0/0"
-      - "-fallbackfee=0.0002"
-      - "-blake2b_headline=depool launch"
-      - "-testactivationheight=blake2b@1"
+    command: >
+      -regtest -server -printtoconsole
+      -rpcuser=depool -rpcpassword=depool -rpcport=18443
+      -rpcbind=0.0.0.0 -rpcallowip=0.0.0.0/0
+      -fallbackfee=0.0002
 
   cln-payer:
     command: >
@@ -77,18 +67,8 @@ services:
       RELAYS: ws://relay:7777
       NETWORK: depool-umbrel-regtest
       CHAIN_RPC: http://bitcoind:18443
-      CHAIN_KIND: blake2b
       CLN_RPC: /run/cln/regtest/lightning-rpc
       CLN_PAYEE_RPC: /run/cln-payee/regtest/lightning-rpc
-    depends_on:
-      relay:
-        condition: service_started
-      cln-payer:
-        condition: service_started
-      cln-payee:
-        condition: service_started
-      bootstrap:
-        condition: service_completed_successfully
 
   control:
     environment:

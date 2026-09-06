@@ -101,9 +101,10 @@ t('control chain rails retargeted to mainnet', /CHAIN_SVC:\s*bitcoind/.test(ctl)
   /CLN_NET:\s*bitcoin/.test(ctl));
 t('app_proxy routes the umbrelOS Open button to control', /APP_HOST:\s*depool-node_control_1/.test(compose) && /APP_PORT:\s*"28700"/.test(compose));
 
-// ── the regtest overlay: dev-only, and CONTAINED ──
-t('overlay swaps the chain for the fork on regtest', /depool-forkd-blake2b:v[0-9.]+/.test(overlay) && /-regtest/.test(overlay));
+// ── the regtest overlay: dev-only, ONE sha256d chain, and CONTAINED ──
+t('overlay is the SAME stock bitcoind on regtest (one chain, like the app)', !/forkd-blake2b/.test(overlay) && /-regtest/.test(overlay));
 t('overlay keeps the service NAME bitcoind (control\'s CHAIN_SVC still lands)', (overlay.match(/^  bitcoind:/m) || []).length === 1);
+t('overlay keeps CHAIN_KIND sha256d (no fork anywhere)', /CHAIN_KIND:\s*sha256d/.test(live(compose)) && !/CHAIN_KIND:\s*blake2b/.test(overlay));
 t('overlay has the bootstrap one-shot the app dropped', /^  bootstrap:/m.test(overlay));
 t('overlay points regtest shares at the LOCAL relay only', /RELAYS:\s*ws:\/\/relay:7777/.test(overlay));
 t('overlay uses a throwaway network tag (never the live "bitcoin" cohort)', /NETWORK:\s*depool-umbrel-regtest/.test(overlay));

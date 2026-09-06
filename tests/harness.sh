@@ -47,12 +47,31 @@ for f in $FILES; do
       "$f" > "$H/$(basename "$f")"
 done
 export APP_DATA_DIR=$DATA APP_SEED=$SEED DEVICE_HOSTNAME=umbrel APP_PASSWORD=x
-DC="docker compose -p $APP $(for f in $H/docker-compose*.yml; do echo -n "-f $f "; done)"
+# -f ORDER MATTERS: later files override earlier ones. The glob would sort
+# docker-compose.regtest.yml BEFORE docker-compose.yml (r < y), so the base
+# file silently overrode the overlay — bitcoind came up as mainnet and the
+# regtest sharechaind values were one failed depends_on away from the live
+# relay. Pass the files in $FILES order, base first.
+DC="docker compose -p $APP $(for f in $FILES; do echo -n "-f $H/$(basename "$f") "; done)"
 
 [ "${LOCAL:-0}" = 1 ] || { echo "[harness] pulling the pinned images"; $DC pull >/dev/null 2>&1 || true; }
 
 echo "[harness] config validation ($LEG leg)"
 $DC config >/dev/null || { echo "FAIL compose config"; exit 1; }
+if [ "$LEG" = regtest ]; then
+  CFG=$($DC config 2>/dev/null) || { echo "FAIL compose config"; exit 1; }
+  # containment: the overlay must be ONE stock sha256d chain on regtest — no
+  # fork anywhere (stock CLN can't parse fork v2 blocks), and the sharechain
+  # values MUST be the throwaway tag + local relay, never the live cohort
+  echo "$CFG" | grep -qi 'blake2b\|forkd' \
+    && { echo "FAIL overlay merge: fork/blake2b leaked into the regtest leg"; exit 1; }
+  echo "$CFG" | grep -q 'NETWORK: depool-umbrel-regtest' \
+    || { echo "FAIL overlay merge: throwaway network tag missing"; exit 1; }
+  echo "$CFG" | grep -q 'RELAYS: ws://relay:7777' \
+    || { echo "FAIL overlay merge: shares not pinned to the local relay"; exit 1; }
+  echo "$CFG" | grep -q 'CHAIN_KIND: sha256d' \
+    || { echo "FAIL overlay merge: CHAIN_KIND must stay sha256d"; exit 1; }
+fi
 
 echo "[harness] up (project $APP — the umbrelOS convention)"
 $DC up -d 2>&1 | tail -3
@@ -137,7 +156,11 @@ else
     sleep 5
   done
   [ -n "$NPUB" ]; t "sharechaind minted its npub (${NPUB:0:12}...)" $?
-  $DC logs sharechaind 2>&1 | grep -q "depool-umbrel-regtest"; t "shares stay on the throwaway network tag" $?
+  # the network tag rides on every published bead (["network", …]) — the
+  # daemon never prints it, so assert the RUNNING container carries the
+  # throwaway tag (never the live "bitcoin" cohort)
+  TAG=$($DC exec -T sharechaind printenv NETWORK 2>/dev/null | tr -d "\r")
+  [ "$TAG" = "depool-umbrel-regtest" ]; t "shares stay on the throwaway network tag ($TAG)" $?
 
   # 3. control /status
   sleep 3
