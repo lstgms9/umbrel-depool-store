@@ -1,6 +1,6 @@
 # depool-node — the depool stack as a one-click Umbrel app.
 #
-# v0.2.0 — MAINNET-FIRST (Damon 2026-08-31 spec reframe: "depool is a
+# v0.2.1 — MAINNET-FIRST (Damon 2026-08-31 spec reframe: "depool is a
 # payout-coordination protocol for any SHA-256 Bitcoin, mainnet-first.
 # There is no depool chain"). The blake2b fork was the cheap test ground;
 # THIS app mines real Bitcoin:

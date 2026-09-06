@@ -34,7 +34,10 @@ LEG=${1:-mainnet}
 FILES="$SRC/depool-node/docker-compose.yml"
 [ "$LEG" = regtest ] && FILES="$SRC/depool-node/docker-compose.yml $SRC/depool-node/docker-compose.regtest.yml"
 
-rm -rf "$H"; mkdir -p "$DATA"
+rm -rf "$H" 2>/dev/null || true
+# a previous leg's containers wrote root-owned files — clean as root
+docker run --rm -v "$(dirname "$H"):/x" alpine rm -rf "/x/$(basename "$H")" >/dev/null 2>&1
+mkdir -p "$DATA"
 for f in $FILES; do
   sed -e 's/0\.0\.0\.0:3333:3333/0.0.0.0:13333:3333/' \
       -e 's/127\.0\.0\.1:28700:28700/127.0.0.1:28701:28700/' \
@@ -165,7 +168,7 @@ execFile("docker", ["compose","--project-directory","/depool","-f","/depool/dock
 fi
 
 echo "[harness] $LEG leg: $ok passed, $fail failed"
-$DC down -v >/dev/null 2>&1
+[ "${SKIP_DOWN:-0}" = 1 ] || $DC down -v >/dev/null 2>&1
 # the data dir is root-owned (container users wrote it) — clean via a root container
 docker run --rm -v "$H:/x" alpine rm -rf /x/app-data >/dev/null 2>&1
 rm -rf "$H"

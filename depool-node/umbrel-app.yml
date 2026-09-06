@@ -2,7 +2,7 @@ manifestVersion: 1
 id: depool-node
 category: bitcoin
 name: Depool Node
-version: 0.2.0
+version: 0.2.1
 tagline: Mine with your own node — no pool in the middle
 description: >-
   Run a sovereign mining node on your Umbrel: a full-validating pruned

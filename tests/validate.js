@@ -27,7 +27,7 @@ t('store declares id: depool', /id:\s*"depool"/.test(store));
 const appId = (/\nid:\s*(\S+)/.exec(app) || [])[1];
 t('app id starts with the store id (umbrel rule)', appId === 'depool-node', appId);
 t('folder name matches the app id', fs.existsSync(path.join(__dirname, '..', appId)));
-for (const f of ['manifestVersion: 1', 'version: 0.2.0', 'tagline:', 'description:', 'developer:', 'website:', 'repo:', 'port:', 'category: bitcoin']) {
+for (const f of ['manifestVersion: 1', 'version: 0.2.1', 'tagline:', 'description:', 'developer:', 'website:', 'repo:', 'port:', 'category: bitcoin']) {
   t('umbrel-app.yml has ' + f.replace(/:$/, ''), app.includes(f));
 }
 t('manifest port is the control API (28700)', /port:\s*28700/.test(app));
