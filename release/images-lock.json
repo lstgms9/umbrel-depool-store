@@ -1,26 +1,26 @@
 {
  "depool-cln": {
   "tag": "v0.2.0",
-  "digest": "pending-release"
+  "digest": "sha256:bcfee2689b4677165358d0aa89f180c5563af8dfcdfe9ccc72ea88b0e37d38ba"
  },
  "depool-bootstrap": {
   "tag": "v0.2.0",
-  "digest": "pending-release"
+  "digest": "sha256:52c468e08468932f405fb6c50e6de75ac94fa3ab91d3d58e17e5ee737ff6df31"
  },
  "depool-sharechaind": {
   "tag": "v0.2.0",
-  "digest": "pending-release"
+  "digest": "sha256:2640c1d129cc2ff2acec43dc43b4f53b70a0effa29da2ce7203844b1cf516eed"
  },
  "depool-control": {
   "tag": "v0.2.0",
-  "digest": "pending-release"
+  "digest": "sha256:45856ec666de9d724cf3cac8011304d05197b8d4717c9da57d941299cdd0f69b"
  },
  "depool-stratum": {
   "tag": "v0.2.0",
-  "digest": "pending-release"
+  "digest": "sha256:26dee3a853b8c1a07e3fe465b0947e3471dfdb104cdc4bad987a706643ad9ab2"
  },
  "depool-relay": {
   "tag": "v0.2.0",
-  "digest": "pending-release"
+  "digest": "sha256:b568dbe4b8443bfd87998e4c84f5373e4411b2bc067197a76c8318e2b3db8151"
  }
 }

@@ -62,13 +62,15 @@ ctlStatus() { curl -sf http://127.0.0.1:28701/status; }
 
 if [ "$LEG" = mainnet ]; then
   # 1. the chain really is syncing REAL mainnet: block count grows and it
-  #    finds mainnet peers. Two samples, growth required.
+  #    finds mainnet peers. Two samples, growth required. Headers-first IBD
+  #    sits on height 0 for minutes before the first block lands — poll
+  #    patiently for the first nonzero sample, then take a second one.
   B1=""
-  for i in $(seq 1 60); do
+  for i in $(seq 1 180); do
     B1=$($DC exec -T bitcoind bitcoin-cli -rpcuser=depool -rpcpassword=depool -rpcport=8332 getblockcount 2>/dev/null | tr -d "\r")
-    [ -n "$B1" ] && break; sleep 5
+    [ -n "$B1" ] && [ "$B1" -gt 0 ] 2>/dev/null && break; sleep 5
   done
-  sleep 45
+  sleep 60
   B2=$($DC exec -T bitcoind bitcoin-cli -rpcuser=depool -rpcpassword=depool -rpcport=8332 getblockcount 2>/dev/null | tr -d "\r")
   PEERS=$($DC exec -T bitcoind bitcoin-cli -rpcuser=depool -rpcpassword=depool -rpcport=8332 getconnectioncount 2>/dev/null | tr -d "\r")
   if [ -n "$B1" ] && [ -n "$B2" ] && [ "$B2" -gt "$B1" ] && [ "${PEERS:-0}" -ge 1 ]; then
