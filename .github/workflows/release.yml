@@ -64,7 +64,11 @@ jobs:
           bx -f release/Dockerfile.bootstrap-umbrel  -t $GH/depool-bootstrap:$VER  bundle
           bx -f release/Dockerfile.sharechaind-umbrel -t $GH/depool-sharechaind:$VER bundle
           bx -f release/Dockerfile.control-umbrel    -t $GH/depool-control:$VER    bundle
-          bx -f bundle/stack/stratum/Dockerfile      -t $GH/depool-stratum:$VER    bundle/stack/stratum
+          # ⚠ stratum's source moved with the stack consolidation (v0.2.2,
+          # 2026-09-13): it lives in the modules tree now, like sharechaind.
+          # The old bundle/stack/stratum path stopped existing and took the
+          # whole release down with it.
+          bx -f bundle/modules/mod-depool/stack/stratum/Dockerfile -t $GH/depool-stratum:$VER bundle/modules/mod-depool/stack/stratum
           bx -f bundle/stack/relay/Dockerfile        -t $GH/depool-relay:$VER      bundle/stack/relay
 
       # ── the version pins in the app compose must match what we just pushed ──

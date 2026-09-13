@@ -1,24 +1,29 @@
-# depool-sharechaind — the stack's sharechaind image (node + ws + daemon)
-# with ONE Umbrel delta: the modules tree is BAKED instead of bind-mounted,
-# because an Umbrel box has no platform checkout. The tree is the SAME
-# reduced set the tenant bundle ships (mod-btc routes.js /stack/bundle) —
-# sharechaind's /modules mount needs exactly this.
-# Built straight from the bundle sources (multi-arch; node:20-slim is
-# multi-arch) — no dependency on the amd64-only images tarball.
+# depool-sharechaind — the stack's line daemon (node + ws) with ONE Umbrel
+# delta: the modules tree is BAKED instead of bind-mounted, because an Umbrel
+# box has no platform checkout. The tree is the SAME reduced set the tenant
+# bundle ships (mod-btc routes.js /stack/bundle).
+#
+# ⚠ IT RUNS THE DAEMON FROM THE MOUNT PATH, NOT FROM /app (v0.2.2, 2026-09-13).
+# The canonical image is modules/mod-depool/stack/lined/Dockerfile, and it is
+# deliberate about ONE copy of the source: the daemon resolves its own root
+# (`MODULE_ROOT || the repo this file lives in`) and requires lib/pool,
+# lib/line, lib/lineblock, stack/lined/events and stack/lined/commit from it —
+# a baked daemon against a differently-revisioned lib is the skew that killed
+# every round on 2026-09-11 (baked daemon called the newly-async mintBead,
+# published a Promise, the relay answered "event is not an object"). Baking the
+# WHOLE tree at /modules and running /modules/.../daemon.js is that same rule
+# for a box that cannot mount it: one revision, one tree.
+#
+# v0.2.1's build broke here and nobody noticed until v0.2.2: it still COPY'd
+# stack/sharechaind/*.js — paths that stopped existing when the stack code
+# consolidated into mod-depool (2026-09-06). Hence the not-found errors.
 FROM node:20-slim
 WORKDIR /app
 RUN npm install --omit=dev ws@8
-# mod-chat/lib/nostrshare.js resolves deps via lib/resolve-dep.js: normal
-# require first, the host tree second. A bare require('ws') from mod-chat/lib
-# never reaches /app — NODE_PATH is how ws lands on its search path.
+# ws resolves from the mounted tree's search path (the tree is read-only in
+# the mount case, so the dependency comes from here) — see lib/resolve-dep.js.
 ENV NODE_PATH=/app/node_modules
-
-COPY stack/sharechaind/daemon.js /app/daemon.js
-COPY stack/sharechaind/payer.js /app/payer.js
-COPY stack/sharechaind/chain.js /app/chain.js
-COPY stack/sharechaind/chainV2.js /app/chainV2.js
-COPY stack/sharechaind/blake2bchain.js /app/blake2bchain.js
 COPY modules /modules
 ENV DATA_DIR=/data
 VOLUME /data
-CMD ["node", "/app/daemon.js"]
+CMD ["node", "/modules/mod-depool/stack/lined/daemon.js"]

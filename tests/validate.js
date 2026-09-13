@@ -60,6 +60,35 @@ for (const img of images) {
 }
 t('six depool images + upstream bitcoind referenced', images.length === 7 && new Set(images).size === 6, images.join(' '));
 
+// ── the release workflow must build from sources that still exist ──
+// ⚠ v0.2.2 (2026-09-13): the v0.2.1 image never built — the workflow still
+// pointed at bundle/stack/sharechaind and bundle/stack/stratum, paths that
+// stopped existing when the stack code consolidated into mod-depool
+// (2026-09-06). The failure only surfaced when someone asked for a rebuild,
+// which is exactly the wrong time to find out. Stack sources live in the
+// modules tree now, so that is the only place the workflow may look.
+{
+  const ci = R('.github/workflows/release.yml');
+  const lines = [...ci.matchAll(/bx -f (\S+)/g)].map((m) => m[1]);
+  t('the workflow builds the six images', lines.length === 6, lines.join(' '));
+  // the bundle's stack/ is mod-btc's stack/ and its modules/ is the module
+  // checkouts — both are siblings on a platform checkout, so the workflow's
+  // sources can be checked against the trees that produce them. A path that
+  // moved (stack/sharechaind did) fails HERE instead of in a release run.
+  const MODS = path.join(__dirname, '..', '..');
+  for (const p of lines) {
+    if (p.startsWith('release/')) {
+      t('build source exists in this repo: ' + p, fs.existsSync(path.join(__dirname, '..', p)));
+    } else if (/^bundle\/stack\//.test(p)) {
+      const src = path.join(MODS, 'mod-btc', p.slice('bundle/'.length));
+      t('build source still exists in mod-btc: ' + p, !fs.existsSync(path.join(MODS, 'mod-btc')) || fs.existsSync(src), src + ' is gone — the stack code may have moved to the modules tree');
+    } else {
+      const src = path.join(MODS, p.slice('bundle/modules/'.length));
+      t('build source is in the modules tree: ' + p, /^bundle\/modules\/mod-depool\/stack\//.test(p) && (!fs.existsSync(MODS) || fs.existsSync(src)), src);
+    }
+  }
+}
+
 // ── nofile: every service that can hold a socket carries the raised limit ──
 // ⚠ v0.2.2 (2026-09-13): Docker's default soft nofile is 1024, and this stack
 // spends one fd per reader. The rehearsal lane's relay hit EMFILE exactly that
