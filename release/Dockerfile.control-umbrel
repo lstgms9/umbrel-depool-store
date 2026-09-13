@@ -8,6 +8,9 @@ FROM alpine:3.20
 RUN apk add --no-cache docker-cli docker-cli-compose nodejs
 COPY stack/control/control.js /control.js
 COPY stack/control/billing.js /billing.js
+# the app's own page (control serves it at '/'; without it the app opens to a
+# 404 and fails umbrelOS's browser-standard gate — see stack/control/page.js)
+COPY stack/control/page.js /page.js
 # control reads power/mode/role from COMPOSE_DIR/.env — umbrelOS never
 # writes one, so the umbrel values are baked (node role, grind off)
 COPY control.env /depool/.env
