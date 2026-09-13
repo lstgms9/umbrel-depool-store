@@ -1,6 +1,6 @@
 # depool-node — the depool stack as a one-click Umbrel app.
 #
-# v0.2.1 — MAINNET-FIRST (Damon 2026-08-31 spec reframe: "depool is a
+# v0.2.2 — MAINNET-FIRST (Damon 2026-08-31 spec reframe: "depool is a
 # payout-coordination protocol for any SHA-256 Bitcoin, mainnet-first.
 # There is no depool chain"). The blake2b fork was the cheap test ground;
 # THIS app mines real Bitcoin:
@@ -36,6 +36,13 @@
 #      umbrelOS's own containers
 # A regtest overlay for dev/harness lives beside this file
 # (docker-compose.regtest.yml) — umbrelOS never sees it.
+#
+# ⚠ EVERY SERVICE CARRIES nofile=524288 (v0.2.2, 2026-09-13). Docker's default
+# soft nofile is 1024, and on this stack one fd is one reader: the rehearsal
+# lane's relay hit EMFILE that way (69k 'Too many open files' in 24h), dropped
+# readers mid-page, and the truncated bead set that produced is what the money
+# side then had to learn to refuse. soft = hard so nothing has to be raised at
+# runtime. Applies to the regtest overlay too (it inherits these services).
 version: "3.7"
 
 services:
@@ -63,6 +70,10 @@ services:
     volumes:
       - ${APP_DATA_DIR}/data/chain:/home/bitcoin/.bitcoin
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
 
   # ── Lightning (real sats): the miner's payout rail ──
   # cln-payer and cln-payee as on the stack; on mainnet no --developer, and
@@ -70,7 +81,7 @@ services:
   # wrapper inside the image targets bitcoind:8332 via env (BCLI_*), so the
   # same image also serves the regtest dev overlay.
   cln-payer:
-    image: ghcr.io/lstgms9/depool-cln:v0.2.1
+    image: ghcr.io/lstgms9/depool-cln:v0.2.2
     command: >
       --network=bitcoin --lightning-dir=/root/.lightning-payer
       --bitcoin-datadir=/home/bitcoin/.bitcoin
@@ -87,9 +98,13 @@ services:
       - ${APP_DATA_DIR}/data/chain:/home/bitcoin/.bitcoin:ro
     depends_on: [bitcoind]
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
 
   cln-payee:
-    image: ghcr.io/lstgms9/depool-cln:v0.2.1
+    image: ghcr.io/lstgms9/depool-cln:v0.2.2
     command: >
       --network=bitcoin --lightning-dir=/root/.lightning-payee
       --bitcoin-datadir=/home/bitcoin/.bitcoin
@@ -106,19 +121,27 @@ services:
       - ${APP_DATA_DIR}/data/chain:/home/bitcoin/.bitcoin:ro
     depends_on: [bitcoind]
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
 
   # local archival relay (loopback only — live shares ride the pool relay)
   relay:
-    image: ghcr.io/lstgms9/depool-relay:v0.2.1
+    image: ghcr.io/lstgms9/depool-relay:v0.2.2
     volumes:
       - ${APP_DATA_DIR}/data/relay:/var/lib/strfry
     ports:
       - "127.0.0.1:2085:7777"
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
 
   # ── the sharechain daemon — the bead DAG + payout commitment ──
   sharechaind:
-    image: ghcr.io/lstgms9/depool-sharechaind:v0.2.1
+    image: ghcr.io/lstgms9/depool-sharechaind:v0.2.2
     cpus: 0.5
     environment:
       # the tenant bundle's values with the MAINNET network tag (spec: the
@@ -154,9 +177,13 @@ services:
       cln-payee:
         condition: service_started
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
 
   control:
-    image: ghcr.io/lstgms9/depool-control:v0.2.1
+    image: ghcr.io/lstgms9/depool-control:v0.2.2
     environment:
       ORIGIN: https://hashoid.io
       # deterministic per-install (umbrelOS derives it from the store seed) —
@@ -193,13 +220,17 @@ services:
     depends_on:
       - sharechaind
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288
 
   # ── stratum — where the user's ASIC points (LAN-exposed on 3333) ──
   # Jobs come from THIS box's bitcoind via getblocktemplate: the user mines
   # their own templates (spec §7.1 template sovereignty), shares join the
   # sharechain, blocks submit straight back to the network.
   stratum:
-    image: ghcr.io/lstgms9/depool-stratum:v0.2.1
+    image: ghcr.io/lstgms9/depool-stratum:v0.2.2
     environment:
       STRATUM_PORT: "3333"
       CHAIN_RPC: http://bitcoind:8332
@@ -212,3 +243,7 @@ services:
       - ${APP_DATA_DIR}/data/miner:/data
     depends_on: [bitcoind]
     restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 524288
+        hard: 524288

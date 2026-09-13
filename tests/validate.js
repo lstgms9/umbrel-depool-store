@@ -27,7 +27,7 @@ t('store declares id: depool', /id:\s*"depool"/.test(store));
 const appId = (/\nid:\s*(\S+)/.exec(app) || [])[1];
 t('app id starts with the store id (umbrel rule)', appId === 'depool-node', appId);
 t('folder name matches the app id', fs.existsSync(path.join(__dirname, '..', appId)));
-for (const f of ['manifestVersion: 1', 'version: 0.2.1', 'tagline:', 'description:', 'developer:', 'website:', 'repo:', 'port:', 'category: bitcoin']) {
+for (const f of ['manifestVersion: 1', "version: 0.2.2", 'tagline:', 'description:', 'developer:', 'website:', 'repo:', 'port:', 'category: bitcoin']) {
   t('umbrel-app.yml has ' + f.replace(/:$/, ''), app.includes(f));
 }
 t('manifest port is the control API (28700)', /port:\s*28700/.test(app));
@@ -59,6 +59,36 @@ for (const img of images) {
   }
 }
 t('six depool images + upstream bitcoind referenced', images.length === 7 && new Set(images).size === 6, images.join(' '));
+
+// ── nofile: every service that can hold a socket carries the raised limit ──
+// ⚠ v0.2.2 (2026-09-13): Docker's default soft nofile is 1024, and this stack
+// spends one fd per reader. The rehearsal lane's relay hit EMFILE exactly that
+// way (69k 'Too many open files' in 24h), dropped readers mid-page, and the
+// truncated bead set that produced is what the money side then had to learn to
+// refuse. A home box with a few hundred peers gets the same 1024 — so the app
+// ships the protection the lane had to learn. soft = hard: nothing to raise at
+// runtime, and a container that cannot get it fails loudly at start.
+{
+  const blocks = compose.split(/\n(?=  [a-z][a-z0-9_-]*:\n)/).slice(1);
+  const withImage = blocks.filter((b) => /^\s+image:/m.test(b));
+  const named = (b) => b.split(':')[0].trim();
+  t('every service with an image carries ulimits (' + withImage.length + ' services)',
+    withImage.length === 7,
+    withImage.map(named).join(','));
+  t('…and every one of them is nofile soft=hard=524288 (not the Docker default 1024)',
+    withImage.every((b) => /ulimits:\n\s+nofile:\n\s+soft: 524288\n\s+hard: 524288/.test(b)),
+    withImage.filter((b) => !/ulimits:\n\s+nofile:\n\s+soft: 524288\n\s+hard: 524288/.test(b)).map(named).join(','));
+  t('the overlay does not silently unset it (it adds a service, never overrides ulimits)',
+    !/ulimits/.test(overlay));
+}
+
+// ── the app version IS the lock's version (what ships exists on the registry) ─
+{
+  const appVer = 'v' + (/^version:\s*(\S+)/m.exec(app) || [])[1];
+  const lockTags = [...new Set(Object.values(lock).map((l) => l.tag))];
+  t('app version matches the locked image tag (' + appVer + ')',
+    lockTags.length === 1 && lockTags[0] === appVer, 'app ' + appVer + ' vs lock ' + lockTags.join(','));
+}
 for (const name of Object.keys(lock)) {
   // bootstrap is overlay-only (the mainnet app has no bootstrap service) —
   // its pin lives in the regtest overlay, everything else in the app compose
