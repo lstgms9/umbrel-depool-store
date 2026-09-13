@@ -5,31 +5,35 @@ name: Depool Node
 version: 0.2.2
 tagline: Mine with your own node — no pool in the middle
 description: >-
-  Run a sovereign mining node on your Umbrel: a full-validating pruned
-  Bitcoin node, a Stratum endpoint for your ASIC, the depool sharechain
-  daemon, and a Lightning wallet for payouts.
+  Mine Bitcoin with your own node, no pool in the middle. This app runs a
+  Stratum endpoint for your ASIC, the depool sharechain daemon, a local
+  share relay, and the Lightning wallet your payouts land in.
 
 
-  Your ASIC's jobs come from YOUR node — you build your own block templates
-  instead of pooling away that choice. Install, point the ASIC at this box's
-  LAN address on port 3333, and claim your box on hashoid.io (Mine page) —
-  the same pairing flow as a bare-metal install. The box phones home by
-  itself; payouts settle over Lightning to your own wallet.
+  IT USES YOUR BITCOIN NODE. This app has no chain of its own: it requires
+  the Bitcoin Node app and reads templates from it (getblocktemplate), so
+  there is no second copy of the blockchain and nothing to sync twice. If
+  your node is pruned that is fine — mining only needs the tip.
 
 
-  Storage: the node keeps a pruned copy of the Bitcoin chain (about 10GB)
-  under the app's data dir, so uninstall and backup behave like any Umbrel
-  app. The first sync takes a few days — full validation, no shortcuts.
+  SET-UP: install Bitcoin Node first (Umbrel asks you to), open this app and
+  point your ASIC's pool URL at this box's LAN address on port 3333 — the
+  app's own page shows the exact address and the live status. Then claim the
+  box on the Mine page at hashoid.io. Your shares are signed by this node;
+  payouts settle over Lightning to your own wallet.
 releaseNotes: >-
   Mainnet: the node now mines real Bitcoin and settles real-sats Lightning
   payouts. Full validation on a pruned chain, multi-arch images (arm64
   Raspberry Pis included), and one Bitcoin chain for both mining templates
   and Lightning.
+dependencies:
+  - bitcoin
 developer: Depool
 website: https://depool.org
 repo: https://github.com/lstgms9/umbrel-depool-store
 support: https://depool.org
 port: 28700
+path: ""
 gallery:
   - 1.jpg
 submitter: Depool

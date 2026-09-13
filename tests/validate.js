@@ -46,19 +46,21 @@ for (const [name, text] of [['manifest', app], ['app compose', live(compose)]]) 
 t('description does not sell a separate settlement chain', !/separate .*chain/i.test(app));
 t('releaseNotes mention arm64', /arm64/i.test(app));
 
-// ── images: registry we control + pinned, or the upstream chain node ──
+// ── images: registry we control, every one pinned tag@sha256 (store rule) ──
 t('no build: contexts (umbrel pulls, never builds)', !/^(\s*)build:/m.test(compose));
 const images = [...compose.matchAll(/^\s+image:\s*(\S+)\s*$/gm)].map((m) => m[1]);
 for (const img of images) {
-  const ok = img === 'bitcoin/bitcoin:29' ||
-    /^ghcr\.io\/lstgms9\/depool-[a-z0-9-]+:v[0-9.]+$/.test(img);
-  t('image allowed + pinned: ' + img, ok);
-  if (/ghcr\.io\/lstgms9\/depool-([a-z0-9-]+):/.test(img)) {
-    const name = 'depool-' + /depool-([a-z0-9-]+):/.exec(img)[1];
-    t('image is in the lock: ' + img, lock[name] && lock[name].tag === img.split(':')[1]);
-  }
+  // the official store's rule: tag AND digest, together, and the digest is the
+  // MANIFEST LIST so an arm64 pull resolves through it
+  const ok = /^ghcr\.io\/lstgms9\/depool-[a-z0-9-]+:v[0-9.]+@sha256:[0-9a-f]{64}$/.test(img);
+  t('image allowed + pinned tag@sha256: ' + img, ok);
+  const m = /ghcr\.io\/lstgms9\/(depool-[a-z0-9-]+):([^@]+)@(sha256:[0-9a-f]{64})/.exec(img);
+  if (m) t('image is in the lock: ' + m[1], lock[m[1]] && lock[m[1]].tag === m[2] && lock[m[1]].digest === m[3]);
 }
-t('six depool images + upstream bitcoind referenced', images.length === 7 && new Set(images).size === 6, images.join(' '));
+// ⚠ NO CHAIN IMAGE HERE (Damon 2026-09-13): the chain is the user's Bitcoin
+// Node app, a DEPENDENCY. Six of ours, no second bitcoin node.
+t('six depool image lines, five images, NO bundled bitcoin node',
+  images.length === 6 && new Set(images).size === 5 && !/bitcoin\/bitcoin/.test(compose), images.join(' '));
 
 // ── the release workflow must build from sources that still exist ──
 // ⚠ v0.2.2 (2026-09-13): the v0.2.1 image never built — the workflow still
@@ -102,7 +104,7 @@ t('six depool images + upstream bitcoind referenced', images.length === 7 && new
   const withImage = blocks.filter((b) => /^\s+image:/m.test(b));
   const named = (b) => b.split(':')[0].trim();
   t('every service with an image carries ulimits (' + withImage.length + ' services)',
-    withImage.length === 7,
+    withImage.length === 6,
     withImage.map(named).join(','));
   t('…and every one of them is nofile soft=hard=524288 (not the Docker default 1024)',
     withImage.every((b) => /ulimits:\n\s+nofile:\n\s+soft: 524288\n\s+hard: 524288/.test(b)),
@@ -132,13 +134,23 @@ t('lock carries six images', Object.keys(lock).length === 6);
 const badBinds = [...compose.matchAll(/^\s+-\s+(\$\{APP_DATA_DIR\}\S*):/gm)]
   .map((m) => m[1]).filter((s) => !s.startsWith('${APP_DATA_DIR}/data/'));
 t('no APP_DATA_DIR bind escapes data/ (umbreld rejects)', badBinds.length === 0, badBinds.join(' '));
-t('docker socket mounted for control (status/wallet exec)', compose.includes('/var/run/docker.sock:/var/run/docker.sock'));
+// ⚠ THE HOST DOCKER SOCKET MUST NOT BE MOUNTED (umbrelOS forbids it: "host
+// Docker socket access is effectively host-root access"). Control reaches the
+// chain over RPC and CLN over its own socket instead.
+t('no host Docker socket anywhere', !/docker\.sock/.test(live(compose)));
 
-// ── the mainnet chain wiring ──
-t('the chain node is upstream bitcoin:29, pruned', /image:\s*bitcoin\/bitcoin:29/.test(compose) && /-prune=10000/.test(compose));
-const bc = compose.indexOf('bitcoind:');
-t('bitcoind is the FIRST service (the chain everything binds to)', /^services:\n\s+app_proxy:\n/.test(compose.slice(compose.indexOf('services:'), bc + 20)) || bc > 0);
-t('stratum templates from the box\'s own bitcoind on mainnet RPC', /CHAIN_RPC:\s*http:\/\/bitcoind:8332/.test(compose));
+// ── THE CHAIN IS THE USER'S BITCOIN NODE (Damon's ruling, 2026-09-13) ──
+t('the manifest depends on the bitcoin app', /^dependencies:\n\s+- bitcoin$/m.test(app));
+t('no bitcoind service is bundled', !/^  bitcoind:/m.test(compose));
+t('every chain rail points at the dependency node contract',
+  /CHAIN_RPC:\s*http:\/\/\$\{APP_BITCOIN_NODE_IP\}:\$\{APP_BITCOIN_RPC_PORT\}/.test(compose) &&
+  /CHAIN_RPC_USER:\s*\$\{APP_BITCOIN_RPC_USER\}/.test(compose) &&
+  /CHAIN_RPC_PASS:\s*\$\{APP_BITCOIN_RPC_PASS\}/.test(compose));
+t('the dependency node\'s datadir is mounted read-only (its own contract)',
+  /\$\{APP_BITCOIN_DATA_DIR\}:\/home\/bitcoin\/\.bitcoin:ro/.test(compose));
+t('CLN talks to that node (rpc connect, user and password from the contract)',
+  /--bitcoin-rpcconnect=\$\{APP_BITCOIN_NODE_IP\}/.test(compose) &&
+  /--bitcoin-rpcuser=\$\{APP_BITCOIN_RPC_USER\}/.test(compose));
 t('no bootstrap service in the app (mainnet onboarding = user deposits)', !/^  bootstrap:/m.test(compose));
 
 // ── sharechaind: the tenant bundle values with the bitcoin network tag ──
@@ -149,15 +161,21 @@ t('sharechaind publishes to the pool relay', /RELAYS:\s*wss:\/\/relay\.hashoid\.
 t('sharechaind on the BITCOIN network tag (spec default)', /NETWORK:\s*bitcoin/.test(shareBlock));
 t('sharechaind speaks plain sha256d (no fork binding)', /CHAIN_KIND:\s*sha256d/.test(shareBlock));
 t('CLN rpc paths on the bitcoin network dir', /CLN_RPC:\s*\/run\/cln\/bitcoin\/lightning-rpc/.test(shareBlock));
-t('stratum is the LAN endpoint on 3333', /0\.0\.0\.0:3333:3333/.test(compose));
+// ⚠ 3333 is taken in the official store's host-port space (bleskomat-server),
+// so the HOST side moves; the container keeps its own listener.
+t('stratum is the LAN endpoint on 23333 (host) → 3333 (container)', /0\.0\.0\.0:23333:3333/.test(compose));
 
 const ctl = compose.slice(compose.indexOf('control:'), compose.indexOf('# ── stratum'));
 t('control targets umbrelOS\'s compose project (app id)', /COMPOSE_PROJECT_NAME:\s*depool-node/.test(ctl));
 t('control heartbeats the tenant', /ORIGIN:\s*https:\/\/hashoid\.io/.test(ctl));
 t('claim-first pairing via APP_SEED identity', /HARDWARE_ID:\s*hw-umbrel-\$\{APP_SEED\}/.test(ctl));
-t('control chain rails retargeted to mainnet', /CHAIN_SVC:\s*bitcoind/.test(ctl) &&
-  /BC_ARGS:\s*-rpcuser=depool -rpcpassword=depool -rpcport=8332/.test(ctl) &&
-  /CLN_NET:\s*bitcoin/.test(ctl));
+t('control reaches the dependency node over RPC, not docker exec',
+  /CHAIN_RPC_URL:\s*http:\/\/\$\{APP_BITCOIN_NODE_IP\}:\$\{APP_BITCOIN_RPC_PORT\}/.test(ctl) &&
+  /CHAIN_RPC_USER:\s*\$\{APP_BITCOIN_RPC_USER\}/.test(ctl) &&
+  !/CHAIN_SVC:\s*bitcoind/.test(ctl));
+t('control reads CLN through its own mounted socket', /CLN_NET:\s*bitcoin/.test(ctl) &&
+  /CLN_PAYER_DIR:\s*\/run\/cln/.test(ctl) && /\/run\/cln:\/run\/cln|data\/cln-payer:\/run\/cln/.test(ctl));
+t('control tells the page the ASIC host port (23333 on Umbrel)', /STRATUM_PORT:\s*"23333"/.test(ctl));
 t('app_proxy routes the umbrelOS Open button to control', /APP_HOST:\s*depool-node_control_1/.test(compose) && /APP_PORT:\s*"28700"/.test(compose));
 
 // ── the regtest overlay: dev-only, ONE sha256d chain, and CONTAINED ──
